@@ -1,5 +1,7 @@
 import ShaderPad from 'shaderpad';
 
+const canvas = document.getElementById('canvas');
+
 function getRandomElement(arr) {
 	return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -29,7 +31,7 @@ function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) 
 		['tan', 1], // Higher = greater "glass block" occurrence.
 	];
 	const innerOperators = ['+', '-', '*'];
-	const variables = ['t', 'x', 'y', 'sx', 'sy', 'xx', 'yy', '.5', '2.'];
+	const variables = ['t', 'x', 'y', 'sx', 'sy', 'xx', 'yy', '.5', '2.', 'uTau', 'uPi', 'uSqrt2'];
 	const timeOperators = ['+', '*'];
 
 	function generateElements(depth = 0) {
@@ -63,35 +65,59 @@ function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) 
 	return `(${expression} + ${chainLength}.) / (${chainLength}. * 2.)`;
 }
 
-let colorMode = 1;
-window.addEventListener('keydown', event => {
-	if (event.code === 'Space') {
-		colorMode = (colorMode + 1) % 3;
-	}
-});
-
 const distFormulas = [
-	['result.x', 5],
-	['length(result) / uSqrt2', 2],
-	['result.x * result.y', 1.5],
-	['(result.x + result.y) / 2.', 1.5],
+	['result.x', 1],
+	['length(result) / uSqrt2', 1],
+	['result.x * result.y', 1],
+	['(result.x + result.y) / 2.', 1],
 ];
-const distFormula = getRandomWeightedElement(distFormulas);
 
-const xOut = generateRandomExpression(1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 12), 4);
-const yOut = generateRandomExpression(1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 12), 4);
+let colorMode = 1;
+let glitchMode = false;
+let shader;
 
-const tScale = `${Math.floor(Math.random() * 12) + 1}.`;
-const tHeadstart = `${Math.floor(Math.random() * 6)}.`;
-const hueHeadstart = Math.random() || '0.';
+const randomFactors = {
+	normal: {
+		outer: 6,
+		inner: 12,
+		depth: 4,
+	},
+	glitched: {
+		outer: 4,
+		inner: 2,
+		depth: 4,
+	},
+};
 
-const fragmentShaderSrc = `
+function init() {
+	const distFormula = getRandomWeightedElement(distFormulas);
+	const { outer, inner, depth } = randomFactors[glitchMode ? 'glitched' : 'normal'];
+
+	const xOut = generateRandomExpression(
+		1 + Math.floor(Math.random() * outer),
+		1 + Math.floor(Math.random() * inner),
+		depth
+	);
+	const yOut = generateRandomExpression(
+		1 + Math.floor(Math.random() * outer),
+		1 + Math.floor(Math.random() * inner),
+		depth
+	);
+
+	const tScale = `${Math.floor(Math.random() * 12) + 1}.`;
+	const tHeadstart = `${Math.floor(Math.random() * 6)}.`;
+	const hueHeadstart = `${Math.random() || '0.'}`;
+
+	const fragmentShaderSrc = `
 precision highp float;
 uniform float uTime;
 uniform vec2 uResolution;
+uniform vec2 uCursor;
 uniform float uIsColorOn;
+uniform int uGlitchMode;
 uniform float uSqrt2;
 uniform float uTau;
+uniform float uPi;
 varying vec2 vUv;
 
 // lch = (lightness, chromaticity, hue)
@@ -159,9 +185,52 @@ vec2 fn(vec2 uv, float t) {
   return vec2(xOut, yOut);
 }
 
+#define round(x) floor((x) + 0.5)
+
+vec2 checkerUv(vec2 uv, float maxDivisions) {
+  float maxDimension = max(uResolution.x, uResolution.y);
+  vec2 xy = uv * uResolution;
+  vec2 gridDimensions = round(maxDivisions * uResolution / maxDimension);
+  // If either grid dimension is 1 or less, don’t apply the grid.
+  gridDimensions = mix(gridDimensions, vec2(1.), step(min(gridDimensions.x, gridDimensions.y), 1.));
+  vec2 gridSpacingPx = round(uResolution / gridDimensions);
+  vec2 gridXy = floor(xy / gridSpacingPx);
+  // Swap the position of grid cells where isEven(x) != isEven(y).
+  float a = mod(gridXy.x, 2.0);
+  float b = mod(gridXy.y, 2.0);
+  vec2 gridXyOffset = vec2(a - b, b - a) * gridSpacingPx;
+  vec2 checkeredUv = (gridXyOffset + xy) / uResolution;
+  return mod(checkeredUv, 1.);
+}
+
+vec2 kaleidoscopeUv(vec2 uv, float numSides) {
+  uv = uv * 2. - 1.;
+  float angle = atan(uv.y, uv.x);
+  float sectorAngle = uTau / numSides;
+  float theta = mod(angle + sectorAngle / 2., sectorAngle) - sectorAngle / 2.;
+  float radius = length(uv);
+  // return (1. + vec2(cos(theta), sin(theta)) * radius) / 2.;
+  // HACK: Instead of returning cartesian coordinates (commented out above),
+  // this returns polar coordinates and renders them as though they were
+  // cartesian. This doesn’t make any sense, but it looks cooler than doing it
+  // the “right way”.
+  float warpedRadius = pow(radius, 4.) * sectorAngle;
+  return vec2(theta, warpedRadius);
+}
+
 void main() {
-  vec2 uv = vUv * 10.0 - 5.0;
-  uv.y *= uResolution.y / uResolution.x;
+  // Infer settings from the cursor position.
+  float zoomLevel = 2.0 + uCursor.x * 16.;
+  float numKaleidoscopeSides = 1. + round(uCursor.x * 7.);
+  float maxGridDivisions = 1. + floor(uCursor.y * max(uResolution.x, uResolution.y) / 20.);
+
+  // Apply uv transformations.
+  vec2 uv = vUv;
+  uv = mix(uv, checkerUv(uv, maxGridDivisions), float(uGlitchMode));
+  uv = mix(uv, kaleidoscopeUv(uv, numKaleidoscopeSides), float(uGlitchMode));
+  uv = (uv - .5) * zoomLevel; // Zoom and center the uv at 0.
+  uv.y *= uResolution.y / uResolution.x; // Prevent distortion and stretching due to the aspect ratio.
+
   float t = sin(uTime / ${tScale}) * ${tScale} + ${tHeadstart};
   vec2 result = fn(uv, t);
   float dist = ${distFormula};
@@ -171,10 +240,10 @@ void main() {
   // float H = cos(dist * t) + uTime / 30.;
   // float K = 0.5 + 0.5 * sin(sqrt(dist) * t);
   float L = .1 + dist * .9;
-  L = L * L; // Bias towards darker colors.
+  L *= L; // Bias towards darker colors.
   float C = (sin(dist * uTau + t / 4.) + 1.) / 3.; // 66% of a colour’s chroma comes from a lightness band that changes over time.
   C += .33 * (1. - L); // Give darker colors a chroma boost.
-  float H = (cos(dist * t) + 1.) / 4. + uTime / 60. + ${hueHeadstart}; // Hue is a limited colour band that rotates over time.
+  float H = (cos(dist * t) + 1.) / 3. + uTime / 300. + ${hueHeadstart}; // Hue is a limited colour band that rotates over time.
 
   vec3 bw = clamp(vec3(L), vec3(0), vec3(1));
   vec3 color = oklch2srgb(vec3(L, C, H));
@@ -183,22 +252,35 @@ void main() {
   gl_FragColor = vec4(mixed, 1.0);
 }`;
 
-const shader = new ShaderPad(fragmentShaderSrc);
+	shader?.destroy();
+	shader = new ShaderPad(fragmentShaderSrc, canvas);
 
-shader.initializeUniform('uSqrt2', 'float', Math.sqrt(2));
-shader.initializeUniform('uPi', 'float', Math.PI);
-shader.initializeUniform('uTau', 'float', Math.PI * 2);
-shader.initializeUniform('uIsColorOn', 'float', 1);
+	shader.initializeUniform('uSqrt2', 'float', Math.sqrt(2));
+	shader.initializeUniform('uTau', 'float', Math.PI * 2);
+	shader.initializeUniform('uPi', 'float', Math.PI);
+	shader.initializeUniform('uIsColorOn', 'float', 1);
+	shader.initializeUniform('uGlitchMode', 'int', glitchMode);
 
-shader.play(time => {
-	let colorValue = colorMode === 0 ? 0 : colorMode === 1 ? 1 : (1 + Math.sin(time / 3)) / 2;
-	shader.updateUniforms({ uIsColorOn: colorValue });
-});
+	shader.play(time => {
+		let colorValue = colorMode === 0 ? 0 : colorMode === 1 ? 1 : (1 + Math.sin(time / 3)) / 2;
+		shader.updateUniforms({ uIsColorOn: colorValue, uGlitchMode: glitchMode ? 1 : 0 });
+	});
+}
 
 window.addEventListener('keydown', event => {
-	if (event.code === 'KeyR') {
-		window.location.reload();
+	if (event.code === 'KeyF') {
+		canvas.requestFullscreen();
+	} else if (event.code === 'KeyG') {
+		glitchMode = !glitchMode;
+	} else if (event.code === 'KeyR') {
+		init();
 	} else if (event.code === 'KeyS') {
-		shader.save();
+		if (shader) {
+			shader.save();
+		}
+	} else if (event.code === 'Space') {
+		colorMode = (colorMode + 1) % 3;
 	}
 });
+
+init();
