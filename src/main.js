@@ -73,7 +73,7 @@ const distFormulas = [
 ];
 
 let colorMode = 1;
-let glitchMode = false;
+let glitchMode = 0;
 let shader;
 
 const randomFactors = {
@@ -226,16 +226,56 @@ vec2 kaleidoscopeUv(vec2 uv, float numSides) {
   return vec2(theta, warpedRadius);
 }
 
+// Source: https://www.shadertoy.com/view/XdVcRW
+#define SQ3 1.7320508076
+mat2 rot2d(float a) { return mat2(cos(a),-sin(a),sin(a),cos(a)); }
+vec2 p6mmmap(vec2 uv, float repeats) {
+  // clamp to a repeating box width 6x height 2x*sqrt(3)
+  uv.x /= SQ3;
+  uv = fract(uv * repeats - 0.5) - 0.5;
+  uv.x *= SQ3;
+  uv = abs(uv);
+  vec2 st = uv;
+
+  vec2 uv330 = rot2d(radians(330.)) * uv;
+  if (uv330.x < 0.0){
+    st.y = (st.y - 0.5) * -1.0;
+    st.x *= SQ3;
+    return st * 2.0;
+  } else if (uv330.x > 0.5){
+    st.x = (st.x - 0.5 * SQ3) * -1.0 * SQ3;
+    return st * 2.0;
+  }
+
+  vec2 uv30 = rot2d(radians(30.)) * uv;
+  if (uv30.y < 0.0 && uv30.x >= 0.5) st = vec2(1.0,1.0);
+  else if (uv30.y >= 0.0 && uv30.x >= 0.5) st = vec2(-1.0,1.0);
+  else if (uv30.y < 0.0 && uv30.x < 0.5) st = vec2(1.0,-1.0);
+  else st = vec2(-1.0,-1.0);
+
+  uv30.x = uv30.x - 0.5;
+  uv = rot2d(radians(270.)) * uv30;
+  st = uv * st;
+  st.x *= SQ3;
+  return st * 2.0;
+}
+
 void main() {
   // Infer settings from the cursor position.
   float zoomLevel = 2.0 + uCursor.x * 16.;
-  float numKaleidoscopeSides = 1. + round(uCursor.x * 7.);
   float maxGridDivisions = 1. + floor(uCursor.y * max(uResolution.x, uResolution.y) / 20.);
+  float numKaleidoscopeSides = 1. + round(uCursor.x * 7.);
+  float numP6mmRepeats = 1. + round(uCursor.x * 5.);
+
+  float isCheckered = float(uGlitchMode == 1 || uGlitchMode == 4 || uGlitchMode == 5 || uGlitchMode == 6);
+  float isKaleidoscope = float(uGlitchMode == 2 || uGlitchMode == 4 || uGlitchMode == 6);
+  float isP6mm = float(uGlitchMode == 3 || uGlitchMode == 5 || uGlitchMode == 6);
 
   // Apply uv transformations.
   vec2 uv = vUv;
-  uv = mix(uv, checkerUv(uv, maxGridDivisions), float(uGlitchMode));
-  uv = mix(uv, kaleidoscopeUv(uv, numKaleidoscopeSides), float(uGlitchMode));
+  uv = mix(uv, checkerUv(uv, maxGridDivisions), isCheckered);
+  uv = mix(uv, kaleidoscopeUv(uv, numKaleidoscopeSides), isKaleidoscope);
+  uv = mix(uv, p6mmmap(uv, numP6mmRepeats), isP6mm);
   uv = (uv - .5) * zoomLevel; // Zoom and center the uv at 0.
   uv.y *= uResolution.y / uResolution.x; // Prevent distortion and stretching due to the aspect ratio.
 
@@ -271,7 +311,7 @@ void main() {
 
 	shader.play(time => {
 		let colorValue = colorMode === 0 ? 0 : colorMode === 1 ? 1 : (1 + Math.sin(time / 3)) / 2;
-		shader.updateUniforms({ uIsColorOn: colorValue, uGlitchMode: glitchMode ? 1 : 0 });
+		shader.updateUniforms({ uIsColorOn: colorValue, uGlitchMode: glitchMode });
 	});
 }
 
@@ -285,7 +325,7 @@ window.addEventListener('keydown', event => {
 			canvas.requestFullscreen();
 		}
 	} else if (event.code === 'KeyG') {
-		glitchMode = !glitchMode;
+		glitchMode = (glitchMode + 1) % 7;
 	} else if (event.code === 'KeyR') {
 		init();
 	} else if (event.code === 'KeyS') {

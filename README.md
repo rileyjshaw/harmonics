@@ -14,7 +14,7 @@ This is a quick project I made to test my [ShaderPad](https://github.com/rileyjs
 | --- | ------------------------------- |
 | `C` | Cycle to next color mode        |
 | `F` | Toggle fullscreen               |
-| `G` | Toggle glitch mode\*            |
+| `G` | Cycle to next glitch mode\*     |
 | `R` | Reload the page                 |
 | `S` | Save the current frame as a PNG |
 
