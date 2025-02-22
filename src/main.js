@@ -108,6 +108,14 @@ function init() {
 	const tHeadstart = `${Math.floor(Math.random() * 6)}.`;
 	const hueHeadstart = `${Math.random() || '0.'}`;
 
+	console.debug(`👁️‍🗨️ Creating a new shader
+xOut: ${xOut}
+yOut: ${yOut}
+tScale: ${tScale}
+tHeadstart: ${tHeadstart}
+hueHeadstart: ${hueHeadstart}
+`);
+
 	const fragmentShaderSrc = `
 precision highp float;
 uniform float uTime;
@@ -268,7 +276,9 @@ void main() {
 }
 
 window.addEventListener('keydown', event => {
-	if (event.code === 'KeyF') {
+	if (event.code === 'KeyC') {
+		colorMode = (colorMode + 1) % 3;
+	} else if (event.code === 'KeyF') {
 		canvas.requestFullscreen();
 	} else if (event.code === 'KeyG') {
 		glitchMode = !glitchMode;
@@ -278,8 +288,6 @@ window.addEventListener('keydown', event => {
 		if (shader) {
 			shader.save();
 		}
-	} else if (event.code === 'Space') {
-		colorMode = (colorMode + 1) % 3;
 	}
 });
 
