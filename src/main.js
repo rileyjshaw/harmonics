@@ -279,7 +279,11 @@ window.addEventListener('keydown', event => {
 	if (event.code === 'KeyC') {
 		colorMode = (colorMode + 1) % 3;
 	} else if (event.code === 'KeyF') {
-		canvas.requestFullscreen();
+		if (document.fullscreenElement) {
+			document.exitFullscreen();
+		} else {
+			canvas.requestFullscreen();
+		}
 	} else if (event.code === 'KeyG') {
 		glitchMode = !glitchMode;
 	} else if (event.code === 'KeyR') {
