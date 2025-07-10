@@ -28,10 +28,10 @@ function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) 
 	const innerFunctions = [
 		['sin', 1],
 		['cos', 1],
-		['tan', 1], // Higher = greater "glass block" occurrence.
+		['tan', 1], // Higher = greater “glass block” occurrence.
 	];
 	const innerOperators = ['+', '-', '*'];
-	const variables = ['t', 'x', 'y', 'sx', 'sy', 'xx', 'yy', '.5', '2.', 'uTau', 'uPi', 'uSqrt2'];
+	const variables = ['t', 'x', 'y', 'sx', 'sy', 'xx', 'yy', '.5', '2.', 'u_tau', 'u_pi', 'u_sqrt2'];
 	const timeOperators = ['+', '*'];
 
 	function generateElements(depth = 0) {
@@ -67,7 +67,7 @@ function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) 
 
 const distFormulas = [
 	['result.x', 1],
-	['length(result) / uSqrt2', 1],
+	['length(result) / u_sqrt2', 1],
 	['result.x * result.y', 1],
 	['(result.x + result.y) / 2.', 1],
 ];
@@ -116,21 +116,24 @@ tHeadstart: ${tHeadstart}
 hueHeadstart: ${hueHeadstart}
 `);
 
-	const fragmentShaderSrc = `
+	const fragmentShaderSrc = `#version 300 es
 precision highp float;
-uniform float uTime;
-uniform vec2 uResolution;
-uniform vec2 uCursor;
-uniform float uIsColorOn;
-uniform int uGlitchMode;
-uniform float uSqrt2;
-uniform float uTau;
-uniform float uPi;
-varying vec2 vUv;
+
+in vec2 v_uv;
+out vec4 o_color;
+
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform vec2 u_cursor;
+uniform float u_isColorOn;
+uniform int u_glitchMode;
+uniform float u_sqrt2;
+uniform float u_tau;
+uniform float u_pi;
 
 // lch = (lightness, chromaticity, hue)
 vec3 oklch2oklab(vec3 lch) {
-  return vec3(lch.x, lch.y * cos(lch.z * uTau), lch.y * sin(lch.z * uTau));
+  return vec3(lch.x, lch.y * cos(lch.z * u_tau), lch.y * sin(lch.z * u_tau));
 }
 
 // oklab = (lightness, red_greenness, blue_yelowness)
@@ -196,25 +199,25 @@ vec2 fn(vec2 uv, float t) {
 #define round(x) floor((x) + 0.5)
 
 vec2 checkerUv(vec2 uv, float maxDivisions) {
-  float maxDimension = max(uResolution.x, uResolution.y);
-  vec2 xy = uv * uResolution;
-  vec2 gridDimensions = round(maxDivisions * uResolution / maxDimension);
+  float maxDimension = max(u_resolution.x, u_resolution.y);
+  vec2 xy = uv * u_resolution;
+  vec2 gridDimensions = round(maxDivisions * u_resolution / maxDimension);
   // If either grid dimension is 1 or less, don’t apply the grid.
   gridDimensions = mix(gridDimensions, vec2(1.), step(min(gridDimensions.x, gridDimensions.y), 1.));
-  vec2 gridSpacingPx = round(uResolution / gridDimensions);
+  vec2 gridSpacingPx = round(u_resolution / gridDimensions);
   vec2 gridXy = floor(xy / gridSpacingPx);
   // Swap the position of grid cells where isEven(x) != isEven(y).
   float a = mod(gridXy.x, 2.0);
   float b = mod(gridXy.y, 2.0);
   vec2 gridXyOffset = vec2(a - b, b - a) * gridSpacingPx;
-  vec2 checkeredUv = (gridXyOffset + xy) / uResolution;
+  vec2 checkeredUv = (gridXyOffset + xy) / u_resolution;
   return mod(checkeredUv, 1.);
 }
 
 vec2 kaleidoscopeUv(vec2 uv, float numSides) {
   uv = uv * 2. - 1.;
   float angle = atan(uv.y, uv.x);
-  float sectorAngle = uTau / numSides;
+  float sectorAngle = u_tau / numSides;
   float theta = mod(angle + sectorAngle / 2., sectorAngle) - sectorAngle / 2.;
   float radius = length(uv);
   // return (1. + vec2(cos(theta), sin(theta)) * radius) / 2.;
@@ -262,56 +265,56 @@ vec2 p6mmmap(vec2 uv, float repeats) {
 
 void main() {
   // Infer settings from the cursor position.
-  float zoomLevel = 2.0 + uCursor.x * 16.;
-  float maxGridDivisions = 1. + floor(uCursor.y * max(uResolution.x, uResolution.y) / 20.);
-  float numKaleidoscopeSides = 1. + round(uCursor.x * 7.);
-  float numP6mmRepeats = 1. + round(uCursor.x * 5.);
+  float zoomLevel = 2.0 + u_cursor.x * 16.;
+  float maxGridDivisions = 1. + floor(u_cursor.y * max(u_resolution.x, u_resolution.y) / 20.);
+  float numKaleidoscopeSides = 1. + round(u_cursor.x * 7.);
+  float numP6mmRepeats = 1. + round(u_cursor.x * 5.);
 
-  float isCheckered = float(uGlitchMode == 1 || uGlitchMode == 4 || uGlitchMode == 5 || uGlitchMode == 6);
-  float isKaleidoscope = float(uGlitchMode == 2 || uGlitchMode == 4 || uGlitchMode == 6);
-  float isP6mm = float(uGlitchMode == 3 || uGlitchMode == 5 || uGlitchMode == 6);
+  float isCheckered = float(u_glitchMode == 1 || u_glitchMode == 4 || u_glitchMode == 5 || u_glitchMode == 6);
+  float isKaleidoscope = float(u_glitchMode == 2 || u_glitchMode == 4 || u_glitchMode == 6);
+  float isP6mm = float(u_glitchMode == 3 || u_glitchMode == 5 || u_glitchMode == 6);
 
   // Apply uv transformations.
-  vec2 uv = vUv;
+  vec2 uv = v_uv;
   uv = mix(uv, checkerUv(uv, maxGridDivisions), isCheckered);
   uv = mix(uv, kaleidoscopeUv(uv, numKaleidoscopeSides), isKaleidoscope);
   uv = mix(uv, p6mmmap(uv, numP6mmRepeats), isP6mm);
   uv = (uv - .5) * zoomLevel; // Zoom and center the uv at 0.
-  uv.y *= uResolution.y / uResolution.x; // Prevent distortion and stretching due to the aspect ratio.
+  uv.y *= u_resolution.y / u_resolution.x; // Prevent distortion and stretching due to the aspect ratio.
 
-  float t = sin(uTime / ${tScale}) * ${tScale} + ${tHeadstart};
+  float t = sin(u_time / ${tScale}) * ${tScale} + ${tHeadstart};
   vec2 result = fn(uv, t);
   float dist = ${distFormula};
   // OG values.
   // float L = 0.5 - 0.5 * sin((dist) * t);
   // float C = sin(t * (L - 1.5));
-  // float H = cos(dist * t) + uTime / 30.;
+  // float H = cos(dist * t) + u_time / 30.;
   // float K = 0.5 + 0.5 * sin(sqrt(dist) * t);
   float L = .1 + dist * .9;
   L *= L; // Bias towards darker colors.
-  float C = (sin(dist * uTau + t / 4.) + 1.) / 3.; // 66% of a colour’s chroma comes from a lightness band that changes over time.
+  float C = (sin(dist * u_tau + t / 4.) + 1.) / 3.; // 66% of a colour’s chroma comes from a lightness band that changes over time.
   C += .33 * (1. - L); // Give darker colors a chroma boost.
-  float H = (cos(dist * t) + 1.) / 3. + uTime / 300. + ${hueHeadstart}; // Hue is a limited colour band that rotates over time.
+  float H = (cos(dist * t) + 1.) / 3. + u_time / 300. + ${hueHeadstart}; // Hue is a limited colour band that rotates over time.
 
   vec3 bw = clamp(vec3(L), vec3(0), vec3(1));
   vec3 color = oklch2srgb(vec3(L, C, H));
 
-  vec3 mixed = mix(bw, color, uIsColorOn);
-  gl_FragColor = vec4(mixed, 1.0);
+  vec3 mixed = mix(bw, color, u_isColorOn);
+  o_color = vec4(mixed, 1.0);
 }`;
 
 	shader?.destroy();
 	shader = new ShaderPad(fragmentShaderSrc, canvas);
 
-	shader.initializeUniform('uSqrt2', 'float', Math.sqrt(2));
-	shader.initializeUniform('uTau', 'float', Math.PI * 2);
-	shader.initializeUniform('uPi', 'float', Math.PI);
-	shader.initializeUniform('uIsColorOn', 'float', 1);
-	shader.initializeUniform('uGlitchMode', 'int', glitchMode);
+	shader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2));
+	shader.initializeUniform('u_tau', 'float', Math.PI * 2);
+	shader.initializeUniform('u_pi', 'float', Math.PI);
+	shader.initializeUniform('u_isColorOn', 'float', 1);
+	shader.initializeUniform('u_glitchMode', 'int', glitchMode);
 
 	shader.play(time => {
 		let colorValue = colorMode === 0 ? 0 : colorMode === 1 ? 1 : (1 + Math.sin(time / 3)) / 2;
-		shader.updateUniforms({ uIsColorOn: colorValue, uGlitchMode: glitchMode });
+		shader.updateUniforms({ u_isColorOn: colorValue, u_glitchMode: glitchMode });
 	});
 }
 
