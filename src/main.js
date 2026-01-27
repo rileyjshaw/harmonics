@@ -48,13 +48,13 @@ function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) 
 			return shouldWrapWithFn
 				? `${getRandomWeightedElement(functions)}(${element}${
 						isOuterExpression ? `, t ${getRandomElement(timeOperators)} ${getRandomElement(variables)}` : ''
-				  })`
+					})`
 				: element;
 		});
 
 		const expression = elements.reduce(
 			(acc, curr, i) => (i === 0 ? curr : `${acc} ${getRandomElement(operators)} ${curr}`),
-			''
+			'',
 		);
 		const chainLength = elements.length;
 		return [expression, chainLength];
@@ -96,12 +96,12 @@ function init() {
 	const xOut = generateRandomExpression(
 		1 + Math.floor(Math.random() * outer),
 		1 + Math.floor(Math.random() * inner),
-		depth
+		depth,
 	);
 	const yOut = generateRandomExpression(
 		1 + Math.floor(Math.random() * outer),
 		1 + Math.floor(Math.random() * inner),
-		depth
+		depth,
 	);
 
 	const tScale = `${Math.floor(Math.random() * 12) + 1}.`;
