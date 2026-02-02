@@ -111,9 +111,12 @@ function init() {
 	console.debug(`👁️‍🗨️ Creating a new shader
 xOut: ${xOut}
 yOut: ${yOut}
+distFormula: ${distFormula}
 tScale: ${tScale}
 tHeadstart: ${tHeadstart}
 hueHeadstart: ${hueHeadstart}
+glitchMode: ${glitchMode}
+colorMode: ${colorMode}
 `);
 
 	const fragmentShaderSrc = `#version 300 es
