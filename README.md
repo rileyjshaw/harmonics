@@ -10,13 +10,16 @@ This is a quick project I made to test my [ShaderPad](https://github.com/rileyjs
 
 ## Keyboard controls
 
-| Key | Action                          |
-| --- | ------------------------------- |
-| `C` | Cycle to next color mode        |
-| `F` | Toggle fullscreen               |
-| `G` | Cycle to next glitch mode\*     |
-| `R` | Reload the page                 |
-| `S` | Save the current frame as a PNG |
+| Key                       | Action                          |
+| ------------------------- | ------------------------------- |
+| `C`                       | Cycle to next color mode        |
+| `F`                       | Toggle fullscreen               |
+| `G`                       | Cycle to next glitch mode\*     |
+| `R`, `Up Arrow`           | Generate a new formula          |
+| `Shift + R`, `Left Arrow` | Go back to the previous formula |
+| `Right Arrow`             | Go forward to the next formula  |
+| `Space`                   | Pause or resume                 |
+| `S`                       | Save the current frame as a PNG |
 
 \*Glitch mode parameters are controlled with your mouse.
 

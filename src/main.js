@@ -75,6 +75,10 @@ const distFormulas = [
 let colorMode = 1;
 let glitchMode = 0;
 let shader;
+let isPaused = false;
+let formulaHistoryIndex = -1;
+
+const formulaHistory = [];
 
 const randomFactors = {
 	normal: {
@@ -89,7 +93,7 @@ const randomFactors = {
 	},
 };
 
-function init() {
+function createRandomFormula() {
 	const distFormula = getRandomWeightedElement(distFormulas);
 	const { outer, inner, depth } = randomFactors[glitchMode ? 'glitched' : 'normal'];
 
@@ -107,6 +111,34 @@ function init() {
 	const tScale = `${Math.floor(Math.random() * 12) + 1}.`;
 	const tHeadstart = `${Math.floor(Math.random() * 6)}.`;
 	const hueHeadstart = `${Math.random() || '0.'}`;
+
+	return { distFormula, hueHeadstart, tHeadstart, tScale, xOut, yOut };
+}
+
+let lastTime;
+function updateShaderUniforms(time = lastTime) {
+	const colorValue = colorMode === 0 ? 0 : colorMode === 1 ? 1 : (1 + Math.sin(time / 3)) / 2;
+	shader.updateUniforms({ u_isColorOn: colorValue, u_glitchMode: glitchMode });
+	lastTime = time;
+}
+
+function togglePause() {
+	isPaused = !isPaused;
+	if (isPaused) {
+		shader.pause();
+	} else {
+		shader.play(updateShaderUniforms);
+	}
+}
+
+function drawIfPaused() {
+	if (!isPaused) return;
+	updateShaderUniforms();
+	shader.draw();
+}
+
+function init(formula) {
+	const { distFormula, hueHeadstart, tHeadstart, tScale, xOut, yOut } = formula;
 
 	console.debug(`👁️‍🗨️ Creating a new shader
 xOut: ${xOut}
@@ -307,7 +339,7 @@ void main() {
 }`;
 
 	shader?.destroy();
-	shader = new ShaderPad(fragmentShaderSrc, canvas);
+	shader = new ShaderPad(fragmentShaderSrc, { canvas });
 
 	shader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2));
 	shader.initializeUniform('u_tau', 'float', Math.PI * 2);
@@ -315,30 +347,80 @@ void main() {
 	shader.initializeUniform('u_isColorOn', 'float', 1);
 	shader.initializeUniform('u_glitchMode', 'int', glitchMode);
 
-	shader.play(time => {
-		let colorValue = colorMode === 0 ? 0 : colorMode === 1 ? 1 : (1 + Math.sin(time / 3)) / 2;
-		shader.updateUniforms({ u_isColorOn: colorValue, u_glitchMode: glitchMode });
-	});
+	if (isPaused) {
+		drawIfPaused();
+	} else {
+		shader.play(updateShaderUniforms);
+	}
+}
+
+function showNewFormula() {
+	formulaHistory.splice(formulaHistoryIndex + 1);
+	formulaHistory.push(createRandomFormula());
+	formulaHistoryIndex = formulaHistory.length - 1;
+	init(formulaHistory[formulaHistoryIndex]);
+}
+
+function showPreviousFormula() {
+	if (formulaHistoryIndex <= 0) return;
+
+	formulaHistoryIndex -= 1;
+	init(formulaHistory[formulaHistoryIndex]);
+}
+
+function showNextFormula() {
+	if (formulaHistoryIndex >= formulaHistory.length - 1) return;
+
+	formulaHistoryIndex += 1;
+	init(formulaHistory[formulaHistoryIndex]);
 }
 
 window.addEventListener('keydown', event => {
-	if (event.code === 'KeyC') {
-		colorMode = (colorMode + 1) % 3;
-	} else if (event.code === 'KeyF') {
-		if (document.fullscreenElement) {
-			document.exitFullscreen();
-		} else {
-			canvas.requestFullscreen();
-		}
-	} else if (event.code === 'KeyG') {
-		glitchMode = (glitchMode + 1) % 7;
-	} else if (event.code === 'KeyR') {
-		init();
-	} else if (event.code === 'KeyS') {
-		if (shader) {
+	if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+	switch (event.code) {
+		case 'KeyC':
+			colorMode = (colorMode + 1) % 3;
+			drawIfPaused();
+			break;
+		case 'KeyF':
+			if (document.fullscreenElement) {
+				document.exitFullscreen();
+			} else {
+				canvas.requestFullscreen();
+			}
+			break;
+		case 'KeyG':
+			glitchMode = (glitchMode + 1) % 7;
+			drawIfPaused();
+			break;
+		case 'KeyR':
+			if (event.shiftKey) {
+				showPreviousFormula();
+			} else {
+				showNewFormula();
+			}
+			break;
+		case 'ArrowLeft':
+			showPreviousFormula();
+			break;
+		case 'ArrowRight':
+			showNextFormula();
+			break;
+		case 'ArrowUp':
+			showNewFormula();
+			break;
+		case 'KeyS':
 			shader.save();
-		}
+			break;
+		case 'Space':
+			if (!event.repeat) togglePause();
+			break;
+		default:
+			return;
 	}
+
+	event.preventDefault();
 });
 
-init();
+showNewFormula();
