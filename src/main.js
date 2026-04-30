@@ -1,6 +1,6 @@
 import ShaderPad from 'shaderpad';
-
-const canvas = document.getElementById('canvas');
+import { createFullscreenCanvas } from 'shaderpad/util';
+import autosize from 'shaderpad/plugins/autosize';
 
 function getRandomElement(arr) {
 	return arr[Math.floor(Math.random() * arr.length)];
@@ -339,11 +339,11 @@ void main() {
 }`;
 
 	shader?.destroy();
-	shader = new ShaderPad(fragmentShaderSrc, { canvas });
+	shader = new ShaderPad(fragmentShaderSrc, { canvas: createFullscreenCanvas(), plugins: [autosize()] });
 
-	shader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2));
-	shader.initializeUniform('u_tau', 'float', Math.PI * 2);
-	shader.initializeUniform('u_pi', 'float', Math.PI);
+	shader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2), { allowMissing: true });
+	shader.initializeUniform('u_tau', 'float', Math.PI * 2, { allowMissing: true });
+	shader.initializeUniform('u_pi', 'float', Math.PI, { allowMissing: true });
 	shader.initializeUniform('u_isColorOn', 'float', 1);
 	shader.initializeUniform('u_glitchMode', 'int', glitchMode);
 
