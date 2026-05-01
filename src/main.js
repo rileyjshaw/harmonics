@@ -1,135 +1,26 @@
 import ShaderPad from 'shaderpad';
 import { createFullscreenCanvas, save } from 'shaderpad/util';
 import autosize from 'shaderpad/plugins/autosize';
-
-function getRandomElement(arr) {
-	return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function getRandomWeightedElement(arr) {
-	const totalWeight = arr.reduce((a, b) => a + b[1], 0);
-	const cutoff = Math.random() * totalWeight;
-	let sum = 0;
-	for (let i = 0; i < arr.length; i++) {
-		sum += arr[i][1];
-		if (cutoff < sum) return arr[i][0];
-	}
-	return arr[arr.length - 1][0];
-}
-
-const OUTER_FUNCTIONS = [
-	['sine', 16],
-	['cosine', 8],
-	['tangent', 8], // NOTE: This breaks a key rule, that outer functions should always be bounded [-1, 1]. But it looks awesome.
-	['triangle', 4],
-	['square', 1],
-];
-const OUTER_OPERATORS = ['+', '-'];
-const INNER_FUNCTIONS = [
-	['sin', 1],
-	['cos', 1],
-	['tan', 1], // Higher = greater “glass block” occurrence.
-];
-const INNER_OPERATORS = ['+', '-', '*'];
-const VARIABLES = [
-	't',
-	'x',
-	'y',
-	'sx',
-	'sy',
-	'xx',
-	'yy',
-	'(xx + yy)',
-	'(xx - yy)',
-	'.5',
-	'2.',
-	'u_tau',
-	'u_pi',
-	'u_sqrt2',
-];
-const TIME_OPERATORS = ['+', '*'];
-function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) {
-	// Reduce max outer and inner elements across all `generateElements` calls.
-	const complexity = Math.random();
-	const outer = [Math.floor(maxOuterElements * complexity) + 1, OUTER_OPERATORS, OUTER_FUNCTIONS];
-	const inner = [Math.floor(maxInnerElements * complexity) + 1, INNER_OPERATORS, INNER_FUNCTIONS];
-
-	function generateElements(depth = 0) {
-		const isOuterExpression = depth === 0;
-		const [maxElements, operators, functions] = isOuterExpression ? outer : inner;
-		const nElements = Math.floor(Math.random() * maxElements) + 1;
-
-		const elements = Array.from({ length: nElements }, () => {
-			const shouldRecurse = depth < maxDepth && Math.random() < 0.4;
-			const shouldWrapWithFn = isOuterExpression || shouldRecurse || Math.random() < 0.33;
-			const element = shouldRecurse ? generateElements(depth + 1)[0] : getRandomElement(VARIABLES);
-			return shouldWrapWithFn
-				? `${getRandomWeightedElement(functions)}(${element}${
-						isOuterExpression
-							? `, t ${getRandomElement(TIME_OPERATORS)} ${getRandomElement(VARIABLES)}`
-							: ''
-					})`
-				: element;
-		});
-
-		const expression = elements.reduce(
-			(acc, curr, i) => (i === 0 ? curr : `${acc} ${getRandomElement(operators)} ${curr}`),
-			'',
-		);
-		const chainLength = elements.length;
-		return [expression, chainLength];
-	}
-
-	const [expression, chainLength] = generateElements();
-
-	// Since each element in the expression ranges [-1, 1], normalize output to [0, 1] like so:
-	return `(${expression} + ${chainLength}.) / (${chainLength}. * 2.)`;
-}
-
-const distFormulas = [
-	['result.x', 1],
-	['length(result) / u_sqrt2', 1],
-	['result.x * result.y', 1],
-	['(result.x + result.y) / 2.', 1],
-];
+import {
+	N_COLOR_MODES,
+	N_GLITCH_MODES,
+	createRandomFormula,
+	decodeCode,
+	encodeState,
+	extractCodeFromFilename,
+} from './share-state.js';
 
 const MAX_FORMULA_HISTORY_LENGTH = 64;
 const canvas = createFullscreenCanvas();
 
-const N_COLOR_MODES = 6;
 let colorMode = 0;
-const N_GLITCH_MODES = 7;
 let glitchMode = 0;
 let shader;
 let isPaused = false;
 let formulaHistoryIndex = -1;
+let currentFormula;
 
 const formulaHistory = [];
-
-const RANDOM_FACTORS = {
-	normal: {
-		outer: 9,
-		inner: 6,
-		depth: 3,
-	},
-	glitched: {
-		outer: 3,
-		inner: 2,
-		depth: 1,
-	},
-};
-function createRandomFormula() {
-	const distFormula = getRandomWeightedElement(distFormulas);
-	const { outer, inner, depth } = RANDOM_FACTORS[glitchMode ? 'glitched' : 'normal'];
-
-	const xOut = generateRandomExpression(outer, inner, depth);
-	const yOut = generateRandomExpression(outer, inner, depth);
-	const tScale = `${Math.floor(Math.random() * 12) + 1}.`;
-	const tHeadstart = `${Math.floor(Math.random() * 6)}.`;
-	const hueHeadstart = `${Math.random() || '0.'}`;
-
-	return { distFormula, hueHeadstart, tHeadstart, tScale, xOut, yOut };
-}
 
 let lastTime;
 function updateShaderUniforms(time = lastTime) {
@@ -152,7 +43,45 @@ function drawIfPaused() {
 	shader.draw();
 }
 
+function getCurrentCode() {
+	return encodeState({ colorMode, glitchMode, formula: currentFormula });
+}
+
+function getShareUrl(code = getCurrentCode()) {
+	const url = new URL(window.location.href);
+	url.hash = code;
+	return url.href;
+}
+
+function replaceHashFromCurrentState() {
+	if (!currentFormula) return;
+	const code = getCurrentCode();
+	if (window.location.hash !== `#${code}`) {
+		window.history.replaceState(window.history.state, '', `#${code}`);
+	}
+}
+
+function pushFormulaHistory(formula) {
+	formulaHistory.splice(formulaHistoryIndex + 1);
+	formulaHistory.push(formula);
+	formulaHistory.splice(0, Math.max(0, formulaHistory.length - MAX_FORMULA_HISTORY_LENGTH));
+	formulaHistoryIndex = formulaHistory.length - 1;
+}
+
+function showState({ colorMode: nextColorMode, glitchMode: nextGlitchMode, formula }, { updateHash = true } = {}) {
+	colorMode = nextColorMode;
+	glitchMode = nextGlitchMode;
+	pushFormulaHistory(formula);
+	init(formula);
+	if (updateHash) replaceHashFromCurrentState();
+}
+
+function warnInvalidCode(code, source) {
+	console.warn(`Could not load Harmonics state from ${source}:`, code);
+}
+
 function init(formula) {
+	currentFormula = formula;
 	const { distFormula, hueHeadstart, tHeadstart, tScale, xOut, yOut } = formula;
 
 	console.debug(`👁️‍🗨️ Creating a new shader
@@ -391,11 +320,10 @@ void main() {
 }
 
 function showNewFormula() {
-	formulaHistory.splice(formulaHistoryIndex + 1);
-	formulaHistory.push(createRandomFormula());
-	formulaHistory.splice(0, Math.max(0, formulaHistory.length - MAX_FORMULA_HISTORY_LENGTH));
-	formulaHistoryIndex = formulaHistory.length - 1;
-	init(formulaHistory[formulaHistoryIndex]);
+	const formula = createRandomFormula(glitchMode);
+	pushFormulaHistory(formula);
+	init(formula);
+	replaceHashFromCurrentState();
 }
 
 function showPreviousFormula() {
@@ -403,6 +331,7 @@ function showPreviousFormula() {
 
 	formulaHistoryIndex -= 1;
 	init(formulaHistory[formulaHistoryIndex]);
+	replaceHashFromCurrentState();
 }
 
 function showNextFormula() {
@@ -410,6 +339,7 @@ function showNextFormula() {
 
 	formulaHistoryIndex += 1;
 	init(formulaHistory[formulaHistoryIndex]);
+	replaceHashFromCurrentState();
 }
 
 window.addEventListener('keydown', event => {
@@ -418,7 +348,9 @@ window.addEventListener('keydown', event => {
 	switch (event.code) {
 		case 'KeyC':
 			colorMode = (colorMode + N_COLOR_MODES + (event.shiftKey ? -1 : 1)) % N_COLOR_MODES;
+			updateShaderUniforms();
 			drawIfPaused();
+			replaceHashFromCurrentState();
 			break;
 		case 'KeyF':
 			if (document.fullscreenElement) {
@@ -428,14 +360,28 @@ window.addEventListener('keydown', event => {
 			}
 			break;
 		case 'KeyG':
-			glitchMode = (glitchMode + 1) % N_GLITCH_MODES;
+			glitchMode = (glitchMode + N_GLITCH_MODES + (event.shiftKey ? -1 : 1)) % N_GLITCH_MODES;
+			updateShaderUniforms();
 			drawIfPaused();
+			replaceHashFromCurrentState();
+			break;
+		case 'KeyQ':
+			colorMode = glitchMode = 0;
+			updateShaderUniforms();
+			drawIfPaused();
+			replaceHashFromCurrentState();
 			break;
 		case 'KeyR':
 			if (event.shiftKey) {
 				showPreviousFormula();
 			} else {
 				showNewFormula();
+			}
+			break;
+		case 'KeyS':
+			{
+				const code = getCurrentCode();
+				save(shader, `harmonics-${code}`, getShareUrl(code));
 			}
 			break;
 		case 'ArrowLeft':
@@ -447,9 +393,6 @@ window.addEventListener('keydown', event => {
 		case 'ArrowUp':
 			showNewFormula();
 			break;
-		case 'KeyS':
-			save(shader, 'harmonics', 'https://rileyjshaw.com/harmonics');
-			break;
 		case 'Space':
 			if (!event.repeat) togglePause();
 			break;
@@ -460,4 +403,49 @@ window.addEventListener('keydown', event => {
 	event.preventDefault();
 });
 
-showNewFormula();
+window.addEventListener('hashchange', () => {
+	const code = window.location.hash.slice(1);
+	if (!code) return;
+
+	const state = decodeCode(code);
+	if (!state) {
+		warnInvalidCode(code, 'hash');
+		return;
+	}
+
+	showState(state, { updateHash: false });
+});
+
+window.addEventListener('dragover', event => {
+	event.preventDefault();
+	if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+});
+
+window.addEventListener('drop', event => {
+	event.preventDefault();
+
+	const files = [...(event.dataTransfer?.files ?? [])];
+	const code = files.map(file => extractCodeFromFilename(file.name)).find(Boolean);
+	if (!code) return;
+
+	const state = decodeCode(code);
+	if (!state) {
+		warnInvalidCode(code, 'filename');
+		return;
+	}
+
+	showState(state);
+});
+
+const initialCode = window.location.hash.slice(1);
+if (initialCode) {
+	const state = decodeCode(initialCode);
+	if (state) {
+		showState(state, { updateHash: false });
+	} else {
+		warnInvalidCode(initialCode, 'initial hash');
+		showNewFormula();
+	}
+} else {
+	showNewFormula();
+}
