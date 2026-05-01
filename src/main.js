@@ -1,5 +1,5 @@
 import ShaderPad from 'shaderpad';
-import { createFullscreenCanvas } from 'shaderpad/util';
+import { createFullscreenCanvas, save } from 'shaderpad/util';
 import autosize from 'shaderpad/plugins/autosize';
 
 function getRandomElement(arr) {
@@ -415,7 +415,7 @@ window.addEventListener('keydown', event => {
 			showNewFormula();
 			break;
 		case 'KeyS':
-			shader.save();
+			save(shader, 'harmonics', 'https://rileyjshaw.com/harmonics');
 			break;
 		case 'Space':
 			if (!event.repeat) togglePause();
