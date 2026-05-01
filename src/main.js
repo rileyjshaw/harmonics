@@ -17,37 +17,57 @@ function getRandomWeightedElement(arr) {
 	return arr[arr.length - 1][0];
 }
 
+const OUTER_FUNCTIONS = [
+	['sine', 16],
+	['cosine', 8],
+	['tangent', 8], // NOTE: This breaks a key rule, that outer functions should always be bounded [-1, 1]. But it looks awesome.
+	['triangle', 4],
+	['square', 1],
+];
+const OUTER_OPERATORS = ['+', '-'];
+const INNER_FUNCTIONS = [
+	['sin', 1],
+	['cos', 1],
+	['tan', 1], // Higher = greater “glass block” occurrence.
+];
+const INNER_OPERATORS = ['+', '-', '*'];
+const VARIABLES = [
+	't',
+	'x',
+	'y',
+	'sx',
+	'sy',
+	'xx',
+	'yy',
+	'(xx + yy)',
+	'(xx - yy)',
+	'.5',
+	'2.',
+	'u_tau',
+	'u_pi',
+	'u_sqrt2',
+];
+const TIME_OPERATORS = ['+', '*'];
 function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) {
-	const outerFunctions = [
-		['sine', 8],
-		['cosine', 4],
-		['triangle', 4],
-		['square', 1],
-	];
-	const outerOperators = ['+', '-'];
-	const innerFunctions = [
-		['sin', 1],
-		['cos', 1],
-		['tan', 1], // Higher = greater “glass block” occurrence.
-	];
-	const innerOperators = ['+', '-', '*'];
-	const variables = ['t', 'x', 'y', 'sx', 'sy', 'xx', 'yy', '.5', '2.', 'u_tau', 'u_pi', 'u_sqrt2'];
-	const timeOperators = ['+', '*'];
+	// Reduce max outer and inner elements across all `generateElements` calls.
+	const complexity = Math.random();
+	const outer = [Math.floor(maxOuterElements * complexity) + 1, OUTER_OPERATORS, OUTER_FUNCTIONS];
+	const inner = [Math.floor(maxInnerElements * complexity) + 1, INNER_OPERATORS, INNER_FUNCTIONS];
 
 	function generateElements(depth = 0) {
 		const isOuterExpression = depth === 0;
-		const [maxElements, operators, functions] = isOuterExpression
-			? [maxOuterElements, outerOperators, outerFunctions]
-			: [maxInnerElements, innerOperators, innerFunctions];
+		const [maxElements, operators, functions] = isOuterExpression ? outer : inner;
 		const nElements = Math.floor(Math.random() * maxElements) + 1;
 
 		const elements = Array.from({ length: nElements }, () => {
 			const shouldRecurse = depth < maxDepth && Math.random() < 0.4;
 			const shouldWrapWithFn = isOuterExpression || shouldRecurse || Math.random() < 0.33;
-			const element = shouldRecurse ? generateElements(depth + 1)[0] : getRandomElement(variables);
+			const element = shouldRecurse ? generateElements(depth + 1)[0] : getRandomElement(VARIABLES);
 			return shouldWrapWithFn
 				? `${getRandomWeightedElement(functions)}(${element}${
-						isOuterExpression ? `, t ${getRandomElement(timeOperators)} ${getRandomElement(variables)}` : ''
+						isOuterExpression
+							? `, t ${getRandomElement(TIME_OPERATORS)} ${getRandomElement(VARIABLES)}`
+							: ''
 					})`
 				: element;
 		});
@@ -61,7 +81,8 @@ function generateRandomExpression(maxOuterElements, maxInnerElements, maxDepth) 
 	}
 
 	const [expression, chainLength] = generateElements();
-	// Since each element in the expression ranges [-1, 1], we can normalize it to [0, 1] like so:
+
+	// Since each element in the expression ranges [-1, 1], normalize output to [0, 1] like so:
 	return `(${expression} + ${chainLength}.) / (${chainLength}. * 2.)`;
 }
 
@@ -75,7 +96,9 @@ const distFormulas = [
 const MAX_FORMULA_HISTORY_LENGTH = 64;
 const canvas = createFullscreenCanvas();
 
-let colorMode = 1;
+const N_COLOR_MODES = 6;
+let colorMode = 0;
+const N_GLITCH_MODES = 7;
 let glitchMode = 0;
 let shader;
 let isPaused = false;
@@ -83,34 +106,24 @@ let formulaHistoryIndex = -1;
 
 const formulaHistory = [];
 
-const randomFactors = {
+const RANDOM_FACTORS = {
 	normal: {
-		outer: 6,
-		inner: 12,
-		depth: 4,
+		outer: 9,
+		inner: 6,
+		depth: 3,
 	},
 	glitched: {
-		outer: 4,
+		outer: 3,
 		inner: 2,
-		depth: 4,
+		depth: 1,
 	},
 };
-
 function createRandomFormula() {
 	const distFormula = getRandomWeightedElement(distFormulas);
-	const { outer, inner, depth } = randomFactors[glitchMode ? 'glitched' : 'normal'];
+	const { outer, inner, depth } = RANDOM_FACTORS[glitchMode ? 'glitched' : 'normal'];
 
-	const xOut = generateRandomExpression(
-		1 + Math.floor(Math.random() * outer),
-		1 + Math.floor(Math.random() * inner),
-		depth,
-	);
-	const yOut = generateRandomExpression(
-		1 + Math.floor(Math.random() * outer),
-		1 + Math.floor(Math.random() * inner),
-		depth,
-	);
-
+	const xOut = generateRandomExpression(outer, inner, depth);
+	const yOut = generateRandomExpression(outer, inner, depth);
 	const tScale = `${Math.floor(Math.random() * 12) + 1}.`;
 	const tHeadstart = `${Math.floor(Math.random() * 6)}.`;
 	const hueHeadstart = `${Math.random() || '0.'}`;
@@ -120,8 +133,7 @@ function createRandomFormula() {
 
 let lastTime;
 function updateShaderUniforms(time = lastTime) {
-	const colorValue = colorMode === 0 ? 0 : colorMode === 1 ? 1 : (1 + Math.sin(time / 3)) / 2;
-	shader.updateUniforms({ u_isColorOn: colorValue, u_glitchMode: glitchMode });
+	shader.updateUniforms({ u_colorMode: colorMode, u_glitchMode: glitchMode });
 	lastTime = time;
 }
 
@@ -158,12 +170,12 @@ colorMode: ${colorMode}
 precision highp float;
 
 in vec2 v_uv;
-out vec4 o_color;
+out vec4 out_color;
 
 uniform float u_time;
 uniform vec2 u_resolution;
 uniform vec2 u_cursor;
-uniform float u_isColorOn;
+uniform int u_colorMode;
 uniform int u_glitchMode;
 uniform float u_sqrt2;
 uniform float u_tau;
@@ -205,6 +217,10 @@ vec3 oklch2srgb(vec3 lch) {
 
 float sine(float period, float t) {
   return sin(t / period);
+}
+
+float tangent(float period, float t) {
+  return tan(t / period);
 }
 
 float cosine(float period, float t) {
@@ -323,22 +339,37 @@ void main() {
   float t = sin(u_time / ${tScale}) * ${tScale} + ${tHeadstart};
   vec2 result = fn(uv, t);
   float dist = ${distFormula};
-  // OG values.
-  // float L = 0.5 - 0.5 * sin((dist) * t);
-  // float C = sin(t * (L - 1.5));
-  // float H = cos(dist * t) + u_time / 30.;
-  // float K = 0.5 + 0.5 * sin(sqrt(dist) * t);
+
   float L = .1 + dist * .9;
   L *= L; // Bias towards darker colors.
   float C = (sin(dist * u_tau + t / 4.) + 1.) / 3.; // 66% of a colour’s chroma comes from a lightness band that changes over time.
   C += .33 * (1. - L); // Give darker colors a chroma boost.
   float H = (cos(dist * t) + 1.) / 3. + u_time / 300. + ${hueHeadstart}; // Hue is a limited colour band that rotates over time.
+  if (u_colorMode == 0) {
+    // Already set.
+  } else if (u_colorMode == 1) {
+    C = 0.;
+  } else if (u_colorMode == 2) {
+    float blend = (1. + sin(u_time / 3.)) / 2.;
+    C = mix(C, L, blend);
+    H = mix(H, L, blend);
+  } else if (u_colorMode == 3) {
+    // Override with OG values.
+    L = 0.5 - 0.5 * sin((dist) * t);
+    C = sin(t * (L - 1.5));
+    H = cos(dist * t) + u_time / 30.;
+  } else if (u_colorMode == 4) {
+    // OG B/W.
+    L = 0.5 + 0.5 * sin(sqrt(dist) * t);
+    C = 0.;
+  } else if (u_colorMode == 5) {
+    L = result.x + result.y;
+	C = result.x - result.y;
+	H = dist;
+  }
 
-  vec3 bw = clamp(vec3(L), vec3(0), vec3(1));
-  vec3 color = oklch2srgb(vec3(L, C, H));
-
-  vec3 mixed = mix(bw, color, u_isColorOn);
-  o_color = vec4(mixed, 1.0);
+  L = clamp(L, 0., 1.);
+  out_color = vec4(oklch2srgb(vec3(L, C, H)), 1.);
 }`;
 
 	shader?.destroy();
@@ -347,8 +378,10 @@ void main() {
 	shader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2), { allowMissing: true });
 	shader.initializeUniform('u_tau', 'float', Math.PI * 2, { allowMissing: true });
 	shader.initializeUniform('u_pi', 'float', Math.PI, { allowMissing: true });
-	shader.initializeUniform('u_isColorOn', 'float', 1);
+	shader.initializeUniform('u_colorMode', 'int', colorMode);
 	shader.initializeUniform('u_glitchMode', 'int', glitchMode);
+
+	shader.on('autosize:resize', drawIfPaused);
 
 	if (isPaused) {
 		drawIfPaused();
@@ -384,7 +417,7 @@ window.addEventListener('keydown', event => {
 
 	switch (event.code) {
 		case 'KeyC':
-			colorMode = (colorMode + 1) % 3;
+			colorMode = (colorMode + N_COLOR_MODES + (event.shiftKey ? -1 : 1)) % N_COLOR_MODES;
 			drawIfPaused();
 			break;
 		case 'KeyF':
@@ -395,7 +428,7 @@ window.addEventListener('keydown', event => {
 			}
 			break;
 		case 'KeyG':
-			glitchMode = (glitchMode + 1) % 7;
+			glitchMode = (glitchMode + 1) % N_GLITCH_MODES;
 			drawIfPaused();
 			break;
 		case 'KeyR':
