@@ -72,6 +72,9 @@ const distFormulas = [
 	['(result.x + result.y) / 2.', 1],
 ];
 
+const MAX_FORMULA_HISTORY_LENGTH = 64;
+const canvas = createFullscreenCanvas();
+
 let colorMode = 1;
 let glitchMode = 0;
 let shader;
@@ -339,7 +342,7 @@ void main() {
 }`;
 
 	shader?.destroy();
-	shader = new ShaderPad(fragmentShaderSrc, { canvas: createFullscreenCanvas(), plugins: [autosize()] });
+	shader = new ShaderPad(fragmentShaderSrc, { canvas, plugins: [autosize()] });
 
 	shader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2), { allowMissing: true });
 	shader.initializeUniform('u_tau', 'float', Math.PI * 2, { allowMissing: true });
@@ -357,6 +360,7 @@ void main() {
 function showNewFormula() {
 	formulaHistory.splice(formulaHistoryIndex + 1);
 	formulaHistory.push(createRandomFormula());
+	formulaHistory.splice(0, Math.max(0, formulaHistory.length - MAX_FORMULA_HISTORY_LENGTH));
 	formulaHistoryIndex = formulaHistory.length - 1;
 	init(formulaHistory[formulaHistoryIndex]);
 }
