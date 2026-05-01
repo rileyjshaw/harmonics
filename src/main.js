@@ -2,13 +2,16 @@ import ShaderPad from 'shaderpad';
 import { createFullscreenCanvas, save } from 'shaderpad/util';
 import autosize from 'shaderpad/plugins/autosize';
 import {
+	DIST_FORMULAS,
 	N_COLOR_MODES,
 	N_GLITCH_MODES,
+	createCustomFormula,
 	createRandomFormula,
 	decodeCode,
 	encodeState,
 	extractCodeFromFilename,
 } from './share-state.js';
+import { FORMULA_EDITOR_ROWS, formatFormulaEditorLine, normalizeFormulaEditorValue } from './formula-editor.js';
 
 const MAX_FORMULA_HISTORY_LENGTH = 64;
 const canvas = createFullscreenCanvas();
@@ -19,16 +22,19 @@ let shader;
 let isPaused = false;
 let formulaHistoryIndex = -1;
 let currentFormula;
+let formulaEditor;
 
 const formulaHistory = [];
 
 let lastTime;
 function updateShaderUniforms(time = lastTime) {
+	if (!shader) return;
 	shader.updateUniforms({ u_colorMode: colorMode, u_glitchMode: glitchMode });
 	lastTime = time;
 }
 
 function togglePause() {
+	if (!shader) return;
 	isPaused = !isPaused;
 	if (isPaused) {
 		shader.pause();
@@ -38,26 +44,34 @@ function togglePause() {
 }
 
 function drawIfPaused() {
-	if (!isPaused) return;
+	if (!isPaused || !shader) return;
 	updateShaderUniforms();
 	shader.draw();
 }
 
 function getCurrentCode() {
-	return encodeState({ colorMode, glitchMode, formula: currentFormula });
+	if (!currentFormula) return null;
+	try {
+		return encodeState({ colorMode, glitchMode, formula: currentFormula });
+	} catch (error) {
+		console.warn('Could not encode Harmonics state.', error);
+		return null;
+	}
 }
 
 function getShareUrl(code = getCurrentCode()) {
 	const url = new URL(window.location.href);
-	url.hash = code;
+	url.hash = code ?? '';
 	return url.href;
 }
 
 function replaceHashFromCurrentState() {
 	if (!currentFormula) return;
 	const code = getCurrentCode();
-	if (window.location.hash !== `#${code}`) {
-		window.history.replaceState(window.history.state, '', `#${code}`);
+	const url = new URL(window.location.href);
+	url.hash = code ?? '';
+	if (url.href !== window.location.href) {
+		window.history.replaceState(window.history.state, '', url.href);
 	}
 }
 
@@ -69,19 +83,27 @@ function pushFormulaHistory(formula) {
 }
 
 function showState({ colorMode: nextColorMode, glitchMode: nextGlitchMode, formula }, { updateHash = true } = {}) {
+	const previousColorMode = colorMode;
+	const previousGlitchMode = glitchMode;
 	colorMode = nextColorMode;
 	glitchMode = nextGlitchMode;
+	const result = renderFormula(formula);
+	if (!result.ok) {
+		colorMode = previousColorMode;
+		glitchMode = previousGlitchMode;
+		updateShaderUniforms();
+		return false;
+	}
 	pushFormulaHistory(formula);
-	init(formula);
 	if (updateHash) replaceHashFromCurrentState();
+	return true;
 }
 
 function warnInvalidCode(code, source) {
 	console.warn(`Could not load Harmonics state from ${source}:`, code);
 }
 
-function init(formula) {
-	currentFormula = formula;
+function getFragmentShaderSrc(formula) {
 	const { distFormula, hueHeadstart, tHeadstart, tScale, xOut, yOut } = formula;
 
 	console.debug(`👁️‍🗨️ Creating a new shader
@@ -300,49 +322,294 @@ void main() {
   L = clamp(L, 0., 1.);
   out_color = vec4(oklch2srgb(vec3(L, C, H)), 1.);
 }`;
+	return fragmentShaderSrc;
+}
 
-	shader?.destroy();
-	shader = new ShaderPad(fragmentShaderSrc, { canvas, plugins: [autosize()] });
+function createInitializedShader(fragmentShaderSrc) {
+	const nextShader = new ShaderPad(fragmentShaderSrc, { canvas, plugins: [autosize()] });
 
-	shader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2), { allowMissing: true });
-	shader.initializeUniform('u_tau', 'float', Math.PI * 2, { allowMissing: true });
-	shader.initializeUniform('u_pi', 'float', Math.PI, { allowMissing: true });
-	shader.initializeUniform('u_colorMode', 'int', colorMode);
-	shader.initializeUniform('u_glitchMode', 'int', glitchMode);
+	try {
+		nextShader.initializeUniform('u_sqrt2', 'float', Math.sqrt(2), { allowMissing: true });
+		nextShader.initializeUniform('u_tau', 'float', Math.PI * 2, { allowMissing: true });
+		nextShader.initializeUniform('u_pi', 'float', Math.PI, { allowMissing: true });
+		nextShader.initializeUniform('u_colorMode', 'int', colorMode);
+		nextShader.initializeUniform('u_glitchMode', 'int', glitchMode);
 
-	shader.on('autosize:resize', drawIfPaused);
+		nextShader.on('autosize:resize', drawIfPaused);
+	} catch (error) {
+		nextShader.destroy();
+		throw error;
+	}
 
+	return nextShader;
+}
+
+function renderFormula(formula) {
+	let nextShader;
+	try {
+		nextShader = createInitializedShader(getFragmentShaderSrc(formula));
+	} catch (error) {
+		console.warn('Could not render Harmonics formula. Keeping the previous shader.', error);
+		return { ok: false, error };
+	}
+
+	const previousShader = shader;
+	previousShader?.destroy();
+	shader = nextShader;
+	currentFormula = formula;
 	if (isPaused) {
 		drawIfPaused();
 	} else {
 		shader.play(updateShaderUniforms);
 	}
+
+	return { ok: true };
 }
 
 function showNewFormula() {
 	const formula = createRandomFormula(glitchMode);
+	const result = renderFormula(formula);
+	if (!result.ok) return false;
+
 	pushFormulaHistory(formula);
-	init(formula);
 	replaceHashFromCurrentState();
+	return true;
 }
 
 function showPreviousFormula() {
 	if (formulaHistoryIndex <= 0) return;
 
+	const previousIndex = formulaHistoryIndex;
 	formulaHistoryIndex -= 1;
-	init(formulaHistory[formulaHistoryIndex]);
+	const result = renderFormula(formulaHistory[formulaHistoryIndex]);
+	if (!result.ok) {
+		formulaHistoryIndex = previousIndex;
+		return false;
+	}
+
 	replaceHashFromCurrentState();
+	return true;
 }
 
 function showNextFormula() {
 	if (formulaHistoryIndex >= formulaHistory.length - 1) return;
 
+	const previousIndex = formulaHistoryIndex;
 	formulaHistoryIndex += 1;
-	init(formulaHistory[formulaHistoryIndex]);
+	const result = renderFormula(formulaHistory[formulaHistoryIndex]);
+	if (!result.ok) {
+		formulaHistoryIndex = previousIndex;
+		return false;
+	}
+
 	replaceHashFromCurrentState();
+	return true;
+}
+
+function getDistFormulaIndex(formula) {
+	if (
+		Number.isInteger(formula?.distFormulaIndex) &&
+		formula.distFormulaIndex >= 0 &&
+		formula.distFormulaIndex < DIST_FORMULAS.length
+	) {
+		return formula.distFormulaIndex;
+	}
+
+	const index = DIST_FORMULAS.findIndex(([distFormula]) => distFormula === formula?.distFormula);
+	return index === -1 ? 0 : index;
+}
+
+function createFormulaEditorShell() {
+	const shell = document.createElement('span');
+	shell.className = 'formula-editor__shell';
+	return shell;
+}
+
+function createFormulaEditorRow(label, { editable = false } = {}) {
+	const row = document.createElement('div');
+	row.className = 'formula-editor__row';
+
+	const shell = editable ? createFormulaEditorShell() : document.createElement('button');
+	if (!editable) {
+		shell.type = 'button';
+		shell.className = 'formula-editor__shell formula-editor__distance';
+	}
+
+	const value = document.createElement('span');
+	value.className = 'formula-editor__value';
+	if (editable) {
+		value.setAttribute('contenteditable', 'plaintext-only');
+		value.spellcheck = false;
+		value.autocapitalize = 'off';
+	}
+
+	shell.append(`${label}: `, value);
+	row.append(shell);
+	return { row, shell, value };
+}
+
+function createFormulaEditor() {
+	const root = document.createElement('div');
+	root.hidden = true;
+	root.className = 'formula-editor';
+	root.setAttribute('aria-label', 'Formula editor');
+
+	const rows = Object.fromEntries(
+		FORMULA_EDITOR_ROWS.map(([label, key]) => {
+			const row = createFormulaEditorRow(label, { editable: key !== 'distFormula' });
+			root.append(row.row);
+			return [key, row];
+		}),
+	);
+
+	rows.xOut.value.addEventListener('input', applyFormulaEditorDraft);
+	rows.yOut.value.addEventListener('input', applyFormulaEditorDraft);
+	rows.distFormula.shell.addEventListener('mousedown', event => {
+		event.preventDefault();
+	});
+	rows.distFormula.shell.addEventListener('click', event => {
+		event.preventDefault();
+		cycleFormulaEditorDistance();
+	});
+
+	root.addEventListener('keydown', event => {
+		if (event.key === 'Enter' || event.key === 'Escape') {
+			event.preventDefault();
+			closeFormulaEditor();
+		}
+	});
+	root.addEventListener('focusout', event => {
+		if (event.relatedTarget && root.contains(event.relatedTarget)) return;
+		requestAnimationFrame(() => {
+			if (!root.hidden && !root.contains(document.activeElement)) closeFormulaEditor();
+		});
+	});
+	document.addEventListener('pointerdown', event => {
+		if (!root.hidden && !root.contains(event.target)) closeFormulaEditor();
+	});
+
+	document.body.append(root);
+	return {
+		root,
+		rows,
+		draftFormula: null,
+		distFormulaIndex: 0,
+	};
+}
+
+function getFormulaEditor() {
+	formulaEditor ??= createFormulaEditor();
+	return formulaEditor;
+}
+
+function isFormulaEditorFocused() {
+	return Boolean(formulaEditor && !formulaEditor.root.hidden && formulaEditor.root.contains(document.activeElement));
+}
+
+function getFormulaEditorValue(key) {
+	return normalizeFormulaEditorValue(getFormulaEditor().rows[key].value.textContent ?? '');
+}
+
+function setFormulaEditorSyntaxError(hasSyntaxError) {
+	if (!formulaEditor) return;
+	formulaEditor.root.classList.toggle('formula-editor--syntax-error', hasSyntaxError);
+}
+
+function setFormulaEditorDistance(index) {
+	const editor = getFormulaEditor();
+	editor.distFormulaIndex = index;
+	editor.rows.distFormula.value.textContent = DIST_FORMULAS[index][0];
+	editor.rows.distFormula.shell.setAttribute('aria-label', formatFormulaEditorLine('D', DIST_FORMULAS[index][0]));
+}
+
+function syncCurrentFormulaHistory() {
+	if (formulaHistoryIndex < 0) {
+		pushFormulaHistory(currentFormula);
+		return;
+	}
+
+	formulaHistory[formulaHistoryIndex] = currentFormula;
+}
+
+function selectFormulaEditorValue(element) {
+	const selection = window.getSelection();
+	if (!selection) return;
+
+	const range = document.createRange();
+	range.selectNodeContents(element);
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
+
+function openFormulaEditor() {
+	if (!currentFormula) return;
+
+	const editor = getFormulaEditor();
+	editor.draftFormula = { ...currentFormula };
+	editor.rows.xOut.value.textContent = currentFormula.xExpression ?? currentFormula.xOut;
+	editor.rows.yOut.value.textContent = currentFormula.yExpression ?? currentFormula.yOut;
+	setFormulaEditorDistance(getDistFormulaIndex(currentFormula));
+	setFormulaEditorSyntaxError(false);
+	document.body.classList.add('formula-editor-open');
+	editor.root.hidden = false;
+	requestAnimationFrame(() => {
+		editor.rows.xOut.value.focus();
+		selectFormulaEditorValue(editor.rows.xOut.value);
+	});
+}
+
+function closeFormulaEditor() {
+	if (!formulaEditor) return;
+	formulaEditor.root.hidden = true;
+	document.body.classList.remove('formula-editor-open');
+	if (formulaEditor.root.contains(document.activeElement)) document.activeElement.blur();
+}
+
+function getFormulaEditorDraft() {
+	const editor = getFormulaEditor();
+	const xOut = getFormulaEditorValue('xOut');
+	const yOut = getFormulaEditorValue('yOut');
+	if (!xOut || !yOut) return null;
+
+	return createCustomFormula({
+		...editor.draftFormula,
+		distFormulaIndex: editor.distFormulaIndex,
+		xExpression: xOut,
+		yExpression: yOut,
+		xNormalizationValue: editor.draftFormula.xNormalizationValue ?? 1,
+		yNormalizationValue: editor.draftFormula.yNormalizationValue ?? 1,
+	});
+}
+
+function applyFormulaEditorDraft() {
+	const editor = getFormulaEditor();
+	const formula = getFormulaEditorDraft();
+	if (!formula) {
+		setFormulaEditorSyntaxError(true);
+		return false;
+	}
+
+	const result = renderFormula(formula);
+	if (!result.ok) {
+		setFormulaEditorSyntaxError(true);
+		return false;
+	}
+
+	editor.draftFormula = formula;
+	setFormulaEditorSyntaxError(false);
+	syncCurrentFormulaHistory();
+	replaceHashFromCurrentState();
+	return true;
+}
+
+function cycleFormulaEditorDistance() {
+	const editor = getFormulaEditor();
+	setFormulaEditorDistance((editor.distFormulaIndex + 1) % DIST_FORMULAS.length);
+	applyFormulaEditorDraft();
 }
 
 window.addEventListener('keydown', event => {
+	if (isFormulaEditorFocused()) return;
 	if (event.altKey || event.ctrlKey || event.metaKey) return;
 
 	switch (event.code) {
@@ -356,8 +623,11 @@ window.addEventListener('keydown', event => {
 			if (document.fullscreenElement) {
 				document.exitFullscreen();
 			} else {
-				canvas.requestFullscreen();
+				document.documentElement.requestFullscreen();
 			}
+			break;
+		case 'KeyE':
+			if (!event.repeat) openFormulaEditor();
 			break;
 		case 'KeyG':
 			glitchMode = (glitchMode + N_GLITCH_MODES + (event.shiftKey ? -1 : 1)) % N_GLITCH_MODES;
@@ -381,7 +651,7 @@ window.addEventListener('keydown', event => {
 		case 'KeyS':
 			{
 				const code = getCurrentCode();
-				save(shader, `harmonics-${code}`, getShareUrl(code));
+				save(shader, code ? `harmonics-${code}` : 'harmonics-custom', getShareUrl(code));
 			}
 			break;
 		case 'ArrowLeft':

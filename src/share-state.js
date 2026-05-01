@@ -1,15 +1,15 @@
 export const OUTER_FUNCTIONS = Object.freeze([
-	['sine', 16],
+	['sine', 8],
 	['cosine', 8],
 	['tangent', 8], // NOTE: This breaks a key rule, that outer functions should always be bounded [-1, 1]. But it looks awesome.
 	['triangle', 4],
-	['square', 1],
+	['square', 2],
 ]);
 export const OUTER_OPERATORS = Object.freeze(['+', '-']);
 export const INNER_FUNCTIONS = Object.freeze([
 	['sin', 1],
 	['cos', 1],
-	['tan', 1], // Higher = greater "glass block" occurrence.
+	['tan', 2], // Higher = greater "glass block" occurrence.
 ]);
 export const INNER_OPERATORS = Object.freeze(['+', '-', '*']);
 export const VARIABLES = Object.freeze([
@@ -39,12 +39,15 @@ export const DIST_FORMULAS = Object.freeze([
 export const N_COLOR_MODES = 6;
 export const N_GLITCH_MODES = 7;
 
-const CODE_VERSION = '1';
-const SAFE_CODE_RE = /^1[A-Za-z0-9_-]+$/;
+const AST_CODE_VERSION = '1';
+const TEXT_CODE_VERSION = '2';
+const SAFE_CODE_RE = /^[12][A-Za-z0-9_-]+$/;
 const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
 const BASE64URL_LOOKUP = new Map([...BASE64URL_ALPHABET].map((char, index) => [char, index]));
 const MAX_DECODE_ELEMENTS = 64;
 const MAX_DECODE_DEPTH = 32;
+const MAX_FORMULA_TEXT_BYTES = 8192;
+const MAX_FORMULA_NORMALIZATION_VALUE = 64;
 
 const RANDOM_FACTORS = {
 	normal: {
@@ -144,6 +147,10 @@ function stringifyExpressionRaw(expression) {
 	return output;
 }
 
+export function stringifyFormulaAstExpression(ast) {
+	return stringifyExpressionRaw(ast);
+}
+
 function stringifyChild(child) {
 	return child.type === 'variable' ? VARIABLES[child.variable] : stringifyExpressionRaw(child.expression);
 }
@@ -160,11 +167,11 @@ function stringifyElement(element, isOuterExpression) {
 }
 
 export function stringifyFormulaAst(ast) {
-	const expression = stringifyExpressionRaw(ast);
+	const expression = stringifyFormulaAstExpression(ast);
 	const chainLength = ast.elements.length;
 
 	// Since each element in the expression ranges [-1, 1], normalize output to [0, 1] like so:
-	return `(${expression} + ${chainLength}.) / (${chainLength}. * 2.)`;
+	return normalizeFormulaExpression(expression, chainLength);
 }
 
 function formatFloatLiteral(value) {
@@ -173,7 +180,29 @@ function formatFloatLiteral(value) {
 	return /^-?\d+$/.test(output) ? `${output}.` : output;
 }
 
+function normalizeFormulaExpression(expression, normalizationValue) {
+	return `(${expression} + ${normalizationValue}.) / (${normalizationValue}. * 2.)`;
+}
+
+function assertFormulaText(expression) {
+	if (typeof expression !== 'string' || expression.trim() === '')
+		throw new RangeError('Formula expressions cannot be empty.');
+	return expression.trim();
+}
+
+function assertFormulaNormalizationValue(value) {
+	if (!Number.isInteger(value) || value < 1 || value > MAX_FORMULA_NORMALIZATION_VALUE) {
+		throw new RangeError('Formula normalization value is out of range.');
+	}
+	return value;
+}
+
 function createFormula({ distFormulaIndex, hueHeadstartValue, tHeadstartValue, tScaleValue, xAst, yAst }) {
+	const xExpression = stringifyFormulaAstExpression(xAst);
+	const yExpression = stringifyFormulaAstExpression(yAst);
+	const xNormalizationValue = xAst.elements.length;
+	const yNormalizationValue = yAst.elements.length;
+
 	return {
 		distFormulaIndex,
 		distFormula: DIST_FORMULAS[distFormulaIndex][0],
@@ -185,8 +214,46 @@ function createFormula({ distFormulaIndex, hueHeadstartValue, tHeadstartValue, t
 		tScale: `${tScaleValue}.`,
 		xAst,
 		yAst,
-		xOut: stringifyFormulaAst(xAst),
-		yOut: stringifyFormulaAst(yAst),
+		xExpression,
+		yExpression,
+		xNormalizationValue,
+		yNormalizationValue,
+		xOut: normalizeFormulaExpression(xExpression, xNormalizationValue),
+		yOut: normalizeFormulaExpression(yExpression, yNormalizationValue),
+	};
+}
+
+export function createCustomFormula({
+	distFormulaIndex,
+	hueHeadstartValue,
+	tHeadstartValue,
+	tScaleValue,
+	xExpression,
+	yExpression,
+	xNormalizationValue = 1,
+	yNormalizationValue = 1,
+}) {
+	const normalizedXExpression = assertFormulaText(xExpression);
+	const normalizedYExpression = assertFormulaText(yExpression);
+	const normalizedXValue = assertFormulaNormalizationValue(xNormalizationValue);
+	const normalizedYValue = assertFormulaNormalizationValue(yNormalizationValue);
+
+	return {
+		isCustom: true,
+		distFormulaIndex,
+		distFormula: DIST_FORMULAS[distFormulaIndex][0],
+		hueHeadstartValue,
+		hueHeadstart: formatFloatLiteral(hueHeadstartValue),
+		tHeadstartValue,
+		tHeadstart: `${tHeadstartValue}.`,
+		tScaleValue,
+		tScale: `${tScaleValue}.`,
+		xExpression: normalizedXExpression,
+		yExpression: normalizedYExpression,
+		xNormalizationValue: normalizedXValue,
+		yNormalizationValue: normalizedYValue,
+		xOut: normalizeFormulaExpression(normalizedXExpression, normalizedXValue),
+		yOut: normalizeFormulaExpression(normalizedYExpression, normalizedYValue),
 	};
 }
 
@@ -248,6 +315,13 @@ class BitWriter {
 		for (const byte of bytes) this.writeBits(byte, 8);
 	}
 
+	writeString(value) {
+		const bytes = new TextEncoder().encode(value);
+		if (bytes.length > MAX_FORMULA_TEXT_BYTES) throw new RangeError('Formula text is too long.');
+		this.writeGamma(bytes.length + 1);
+		for (const byte of bytes) this.writeBits(byte, 8);
+	}
+
 	toBytes() {
 		return Uint8Array.from(this.bitLength % 8 === 0 ? this.bytes : [...this.bytes, this.currentByte]);
 	}
@@ -296,6 +370,15 @@ class BitReader {
 		const value = new DataView(bytes.buffer).getFloat64(0, false);
 		if (!Number.isFinite(value)) throw new RangeError('Decoded float is not finite.');
 		return value;
+	}
+
+	readString() {
+		const byteLength = this.readGamma() - 1;
+		if (byteLength > MAX_FORMULA_TEXT_BYTES) throw new RangeError('Formula text is too long.');
+
+		const bytes = new Uint8Array(byteLength);
+		for (let i = 0; i < bytes.length; i++) bytes[i] = this.readBits(8);
+		return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 	}
 
 	assertOnlyZeroPadding() {
@@ -486,15 +569,21 @@ export function encodeState({ colorMode, glitchMode, formula }) {
 	writer.writeBits(formula.tScaleValue - 1, 4);
 	writer.writeBits(formula.tHeadstartValue, 3);
 	writer.writeFloat64(formula.hueHeadstartValue);
+
+	if (formula.isCustom || !formula.xAst || !formula.yAst) {
+		writer.writeGamma(assertFormulaNormalizationValue(formula.xNormalizationValue ?? 1));
+		writer.writeGamma(assertFormulaNormalizationValue(formula.yNormalizationValue ?? 1));
+		writer.writeString(assertFormulaText(formula.xExpression));
+		writer.writeString(assertFormulaText(formula.yExpression));
+		return `${TEXT_CODE_VERSION}${bytesToBase64Url(writer.toBytes())}`;
+	}
+
 	writeExpression(writer, formula.xAst, true);
 	writeExpression(writer, formula.yAst, true);
-	return `${CODE_VERSION}${bytesToBase64Url(writer.toBytes())}`;
+	return `${AST_CODE_VERSION}${bytesToBase64Url(writer.toBytes())}`;
 }
 
-function decodeCodeOrThrow(code) {
-	if (!SAFE_CODE_RE.test(code)) throw new RangeError('Code contains unsafe characters or an unsupported version.');
-
-	const reader = new BitReader(base64UrlToBytes(code.slice(1)));
+function readStateHeader(reader) {
 	const colorMode = reader.readBits(3);
 	if (colorMode >= N_COLOR_MODES) throw new RangeError('Color mode is out of range.');
 
@@ -509,6 +598,13 @@ function decodeCodeOrThrow(code) {
 	if (tHeadstartValue >= 6) throw new RangeError('Time headstart is out of range.');
 
 	const hueHeadstartValue = reader.readFloat64();
+
+	return { colorMode, glitchMode, distFormulaIndex, tScaleValue, tHeadstartValue, hueHeadstartValue };
+}
+
+function decodeAstCode(reader) {
+	const { colorMode, glitchMode, distFormulaIndex, tScaleValue, tHeadstartValue, hueHeadstartValue } =
+		readStateHeader(reader);
 	const xAst = readExpression(reader, true);
 	const yAst = readExpression(reader, true);
 	reader.assertOnlyZeroPadding();
@@ -525,6 +621,40 @@ function decodeCodeOrThrow(code) {
 			yAst,
 		}),
 	};
+}
+
+function decodeTextCode(reader) {
+	const { colorMode, glitchMode, distFormulaIndex, tScaleValue, tHeadstartValue, hueHeadstartValue } =
+		readStateHeader(reader);
+	const xNormalizationValue = assertFormulaNormalizationValue(reader.readGamma());
+	const yNormalizationValue = assertFormulaNormalizationValue(reader.readGamma());
+	const xExpression = reader.readString();
+	const yExpression = reader.readString();
+	reader.assertOnlyZeroPadding();
+
+	return {
+		colorMode,
+		glitchMode,
+		formula: createCustomFormula({
+			distFormulaIndex,
+			hueHeadstartValue,
+			tHeadstartValue,
+			tScaleValue,
+			xExpression,
+			yExpression,
+			xNormalizationValue,
+			yNormalizationValue,
+		}),
+	};
+}
+
+function decodeCodeOrThrow(code) {
+	if (!SAFE_CODE_RE.test(code)) throw new RangeError('Code contains unsafe characters or an unsupported version.');
+
+	const reader = new BitReader(base64UrlToBytes(code.slice(1)));
+	if (code[0] === AST_CODE_VERSION) return decodeAstCode(reader);
+	if (code[0] === TEXT_CODE_VERSION) return decodeTextCode(reader);
+	throw new RangeError('Unsupported code version.');
 }
 
 export function decodeCode(code) {

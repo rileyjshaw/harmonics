@@ -7,14 +7,17 @@ import {
 	N_GLITCH_MODES,
 	OUTER_FUNCTIONS,
 	VARIABLES,
+	createCustomFormula,
 	createRandomFormula,
 	decodeCode,
 	encodeState,
 	extractCodeFromFilename,
 	stringifyFormulaAst,
+	stringifyFormulaAstExpression,
 } from '../src/share-state.js';
 
 const SAFE_CODE_RE = /^1[A-Za-z0-9_-]+$/;
+const SAFE_TEXT_CODE_RE = /^2[A-Za-z0-9_-]+$/;
 
 function seededRandom(seed) {
 	let state = seed >>> 0;
@@ -80,7 +83,36 @@ test('exports the current v1 formula tables', () => {
 });
 
 test('stringifies a formula AST using the shader formula format', () => {
+	assert.equal(stringifyFormulaAstExpression(simpleOuterAst()), 'sine(t, t + t)');
 	assert.equal(stringifyFormulaAst(simpleOuterAst()), '(sine(t, t + t) + 1.) / (1. * 2.)');
+});
+
+test('round-trips custom text formulas through URL-safe state codes', () => {
+	const formula = createCustomFormula({
+		distFormulaIndex: 1,
+		tScaleValue: 4,
+		tHeadstartValue: 2,
+		hueHeadstartValue: 0.125,
+		xExpression: 'sin(x + t)',
+		yExpression: 'cos(y - t)',
+		xNormalizationValue: 2,
+		yNormalizationValue: 3,
+	});
+	const code = encodeState({ colorMode: 2, glitchMode: 3, formula });
+
+	assert.match(code, SAFE_TEXT_CODE_RE);
+	const decoded = decodeCode(code);
+	assert.ok(decoded);
+	assert.equal(decoded.colorMode, 2);
+	assert.equal(decoded.glitchMode, 3);
+	assert.equal(decoded.formula.isCustom, true);
+	assert.equal(decoded.formula.xExpression, formula.xExpression);
+	assert.equal(decoded.formula.yExpression, formula.yExpression);
+	assert.equal(decoded.formula.xNormalizationValue, formula.xNormalizationValue);
+	assert.equal(decoded.formula.yNormalizationValue, formula.yNormalizationValue);
+	assert.equal(decoded.formula.xOut, '(sin(x + t) + 2.) / (2. * 2.)');
+	assert.equal(decoded.formula.yOut, '(cos(y - t) + 3.) / (3. * 2.)');
+	assert.equal(encodeState(decoded), code);
 });
 
 test('round-trips generated states through safe URL and filename code characters', () => {

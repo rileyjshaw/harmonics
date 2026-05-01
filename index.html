@@ -5,8 +5,52 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Harmonics</title>
 		<style>
-			canvas {
+			body:not(.formula-editor-open) canvas {
 				cursor: none;
+			}
+
+			.formula-editor {
+				position: fixed;
+				top: 12px;
+				left: 12px;
+				z-index: 1;
+				max-width: calc(100vw - 24px);
+				color: #fff;
+				font: 32px/1.125 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+			}
+
+			.formula-editor__row {
+				max-width: 100%;
+				margin: 0 0 5px;
+			}
+
+			.formula-editor__shell {
+				display: inline-block;
+				max-width: 100%;
+				box-sizing: border-box;
+				padding: 1px 5px;
+				border: 0;
+				border-radius: 0;
+				background: rgba(0,0,0,0.75);
+				color: #fff;
+				font: inherit;
+				line-height: 1.125;
+				text-align: left;
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+
+			.formula-editor--syntax-error .formula-editor__shell {
+				background: rgba(128,0,0,0.75);
+			}
+
+			.formula-editor__distance {
+				cursor: pointer;
+			}
+
+			.formula-editor__value[contenteditable] {
+				outline: none;
+				caret-color: #fff;
 			}
 		</style>
 	</head>

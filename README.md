@@ -13,6 +13,7 @@ This is a quick project I made to test my [ShaderPad](https://github.com/rileyjs
 | Key                       | Action                          |
 | ------------------------- | ------------------------------- |
 | `C`                       | Cycle to next color mode        |
+| `E`                       | Open the formula editor         |
 | `F`                       | Toggle fullscreen               |
 | `G`                       | Cycle to next glitch mode\*     |
 | `R`, `Up Arrow`           | Generate a new formula          |
