@@ -336,6 +336,9 @@ function createInitializedShader(fragmentShaderSrc) {
 		nextShader.initializeUniform('u_glitchMode', 'int', glitchMode);
 
 		nextShader.on('autosize:resize', drawIfPaused);
+		nextShader.on('updateUniforms', updates => {
+			if (Object.hasOwn(updates, 'u_cursor')) drawIfPaused();
+		});
 	} catch (error) {
 		nextShader.destroy();
 		throw error;
