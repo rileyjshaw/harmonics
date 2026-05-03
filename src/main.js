@@ -26,7 +26,7 @@ let formulaEditor;
 
 const formulaHistory = [];
 
-let lastTime;
+let lastTime = 0;
 function updateShaderUniforms(time = lastTime) {
 	if (!shader) return;
 	shader.updateUniforms({ u_colorMode: colorMode, u_glitchMode: glitchMode });
@@ -334,6 +334,7 @@ function createInitializedShader(fragmentShaderSrc) {
 		nextShader.initializeUniform('u_pi', 'float', Math.PI, { allowMissing: true });
 		nextShader.initializeUniform('u_colorMode', 'int', colorMode);
 		nextShader.initializeUniform('u_glitchMode', 'int', glitchMode);
+		nextShader.updateUniforms({ u_time: lastTime });
 
 		nextShader.on('autosize:resize', drawIfPaused);
 		nextShader.on('updateUniforms', updates => {
