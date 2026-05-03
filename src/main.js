@@ -34,6 +34,36 @@ let formulaEditor;
 
 const formulaHistory = [];
 
+const RESOLUTIONS = [
+	{ w: 3600, h: 4800, label: '12"x16"' },
+	{ w: 2400, h: 3000, label: '8"x10"' },
+	{ w: 1500, h: 2100, label: '5"x7"' },
+	{ label: 'Default' },
+];
+let resolutionIndex = RESOLUTIONS.length - 1;
+let resolutionIndicator;
+let resolutionIndicatorTimer;
+
+function enforceResolution() {
+	const res = RESOLUTIONS[resolutionIndex];
+	if (res.w && res.h && (canvas.width !== res.w || canvas.height !== res.h)) {
+		canvas.width = res.w;
+		canvas.height = res.h;
+	}
+}
+
+function applyResolution() {
+	enforceResolution();
+	if (!RESOLUTIONS[resolutionIndex].w) window.dispatchEvent(new Event('resize'));
+	resolutionIndicator ??= document.body.appendChild(
+		Object.assign(document.createElement('div'), { className: 'resolution-indicator' }),
+	);
+	resolutionIndicator.textContent = RESOLUTIONS[resolutionIndex].label;
+	resolutionIndicator.classList.add('is-visible');
+	clearTimeout(resolutionIndicatorTimer);
+	resolutionIndicatorTimer = setTimeout(() => resolutionIndicator.classList.remove('is-visible'), 1000);
+}
+
 let lastTime = 0,
 	lastFrame = 0;
 const lastCursor = [0.5, 0.5];
@@ -399,7 +429,10 @@ function createInitializedShader(fragmentShaderSrc) {
 		nextShader.updateUniforms({ u_time: lastTime, u_frame: lastFrame }, { allowMissing: true });
 		nextShader.updateUniforms({ u_cursor: lastCursor }, { allowMissing: true });
 
-		nextShader.on('autosize:resize', drawIfPaused);
+		nextShader.on('autosize:resize', () => {
+			enforceResolution();
+			drawIfPaused();
+		});
 		nextShader.on('updateUniforms', updates => {
 			if (Object.hasOwn(updates, 'u_cursor')) drawIfPaused();
 		});
@@ -702,6 +735,10 @@ window.addEventListener('keydown', event => {
 			updateShaderUniforms();
 			drawIfPaused();
 			replaceHashFromCurrentState();
+			break;
+		case 'KeyP':
+			resolutionIndex = (resolutionIndex + 1) % RESOLUTIONS.length;
+			applyResolution();
 			break;
 		case 'KeyO':
 			origin = [...DEFAULT_ORIGIN];

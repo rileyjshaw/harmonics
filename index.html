@@ -5,6 +5,11 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Harmonics</title>
 		<style>
+			body { background: #000; font-family: ui-monospace, monospace; }
+			button, input, textarea, select { font: inherit; }
+
+			canvas { object-fit: contain; }
+
 			body:not(.formula-editor-open) canvas {
 				cursor: none;
 			}
@@ -16,7 +21,8 @@
 				z-index: 1;
 				max-width: calc(100vw - 24px);
 				color: #fff;
-				font: 32px/1.125 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+				font-size: 32px;
+				line-height: 1.125;
 			}
 
 			.formula-editor__row {
@@ -33,7 +39,6 @@
 				border-radius: 0;
 				background: rgba(0,0,0,0.75);
 				color: #fff;
-				font: inherit;
 				line-height: 1.125;
 				text-align: left;
 				white-space: pre-wrap;
@@ -52,6 +57,22 @@
 				outline: none;
 				caret-color: #fff;
 			}
+
+			.resolution-indicator {
+				position: fixed;
+				right: 12px;
+				bottom: 12px;
+				z-index: 2;
+				padding: 4px 8px;
+				background: rgba(0,0,0,0.75);
+				color: #fff;
+				font-size: 16px;
+				line-height: 1.125;
+				pointer-events: none;
+				opacity: 0;
+				transition: opacity 0.2s;
+			}
+			.resolution-indicator.is-visible { opacity: 1; }
 		</style>
 	</head>
 	<body>
