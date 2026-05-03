@@ -26,11 +26,26 @@ let formulaEditor;
 
 const formulaHistory = [];
 
-let lastTime = 0;
-function updateShaderUniforms(time = lastTime) {
+let lastTime = 0,
+	lastFrame = 0;
+const lastCursor = [0.5, 0.5];
+
+function updateLastCursor(x, y) {
+	const rect = canvas.getBoundingClientRect();
+	if (!rect.width || !rect.height) return;
+	lastCursor[0] = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
+	lastCursor[1] = Math.max(0, Math.min(1, 1 - (y - rect.top) / rect.height));
+}
+
+canvas.addEventListener('pointermove', event => {
+	updateLastCursor(event.clientX, event.clientY);
+});
+
+function updateShaderUniforms(time = lastTime, frame = lastFrame) {
 	if (!shader) return;
 	shader.updateUniforms({ u_colorMode: colorMode, u_glitchMode: glitchMode });
 	lastTime = time;
+	lastFrame = frame;
 }
 
 function togglePause() {
@@ -334,7 +349,8 @@ function createInitializedShader(fragmentShaderSrc) {
 		nextShader.initializeUniform('u_pi', 'float', Math.PI, { allowMissing: true });
 		nextShader.initializeUniform('u_colorMode', 'int', colorMode);
 		nextShader.initializeUniform('u_glitchMode', 'int', glitchMode);
-		nextShader.updateUniforms({ u_time: lastTime });
+		nextShader.updateUniforms({ u_time: lastTime, u_frame: lastFrame }, { allowMissing: true });
+		nextShader.updateUniforms({ u_cursor: lastCursor }, { allowMissing: true });
 
 		nextShader.on('autosize:resize', drawIfPaused);
 		nextShader.on('updateUniforms', updates => {
