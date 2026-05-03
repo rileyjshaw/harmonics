@@ -40,7 +40,8 @@ export const N_COLOR_MODES = 6;
 export const N_GLITCH_MODES = 7;
 
 const AST_CODE_VERSION = '1';
-const TEXT_CODE_VERSION = '2';
+const V2_CODE_VERSION = '2';
+const V2_MARKER = 7;
 const SAFE_CODE_RE = /^[12][A-Za-z0-9_-]+$/;
 const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
 const BASE64URL_LOOKUP = new Map([...BASE64URL_ALPHABET].map((char, index) => [char, index]));
@@ -48,6 +49,12 @@ const MAX_DECODE_ELEMENTS = 64;
 const MAX_DECODE_DEPTH = 32;
 const MAX_FORMULA_TEXT_BYTES = 8192;
 const MAX_FORMULA_NORMALIZATION_VALUE = 64;
+const DEFAULT_ROTATION = 0;
+const DEFAULT_ZOOM_LEVEL = 0;
+const DEFAULT_ORIGIN = Object.freeze([0, 0]);
+const ZOOM_LEVEL_BIAS = 32;
+const MIN_ZOOM_LEVEL = -ZOOM_LEVEL_BIAS;
+const MAX_ZOOM_LEVEL = ZOOM_LEVEL_BIAS - 1;
 
 const RANDOM_FACTORS = {
 	normal: {
@@ -554,36 +561,66 @@ function readExpression(reader, isOuterExpression, depth = 0) {
 	};
 }
 
-export function encodeState({ colorMode, glitchMode, formula }) {
+export function encodeState({
+	colorMode,
+	glitchMode,
+	formula,
+	origin = DEFAULT_ORIGIN,
+	rotation = DEFAULT_ROTATION,
+	zoomLevel = DEFAULT_ZOOM_LEVEL,
+}) {
 	if (!Number.isInteger(colorMode) || colorMode < 0 || colorMode >= N_COLOR_MODES) {
 		throw new RangeError('Color mode is out of range.');
 	}
 	if (!Number.isInteger(glitchMode) || glitchMode < 0 || glitchMode >= N_GLITCH_MODES) {
 		throw new RangeError('Glitch mode is out of range.');
 	}
+	if (!Number.isInteger(rotation) || rotation < 0 || rotation > 3) throw new RangeError('Rotation is out of range.');
+	if (!Number.isInteger(zoomLevel) || zoomLevel < MIN_ZOOM_LEVEL || zoomLevel > MAX_ZOOM_LEVEL) {
+		throw new RangeError('Zoom level is out of range.');
+	}
+	if (!Array.isArray(origin) || origin.length !== 2 || !origin.every(Number.isFinite)) {
+		throw new RangeError('Origin is out of range.');
+	}
+	const isCustom = formula.isCustom || !formula.xAst || !formula.yAst;
+	const isDefaultOrigin = origin[0] === 0 && origin[1] === 0;
+	const isV2 = rotation !== DEFAULT_ROTATION || zoomLevel !== DEFAULT_ZOOM_LEVEL || !isDefaultOrigin || isCustom;
 
 	const writer = new BitWriter();
+	if (isV2) writer.writeBits(V2_MARKER, 3);
 	writer.writeBits(colorMode, 3);
 	writer.writeBits(glitchMode, 3);
 	writer.writeBits(formula.distFormulaIndex, 2);
 	writer.writeBits(formula.tScaleValue - 1, 4);
 	writer.writeBits(formula.tHeadstartValue, 3);
-	writer.writeFloat64(formula.hueHeadstartValue);
+	if (isV2) {
+		writer.writeBits(rotation, 2);
+		writer.writeBits(zoomLevel + ZOOM_LEVEL_BIAS, 6);
+		writer.writeFloat64(origin[0]);
+		writer.writeFloat64(origin[1]);
+		writer.writeFloat64(formula.hueHeadstartValue);
+		writer.writeBit(isCustom);
 
-	if (formula.isCustom || !formula.xAst || !formula.yAst) {
-		writer.writeGamma(assertFormulaNormalizationValue(formula.xNormalizationValue ?? 1));
-		writer.writeGamma(assertFormulaNormalizationValue(formula.yNormalizationValue ?? 1));
-		writer.writeString(assertFormulaText(formula.xExpression));
-		writer.writeString(assertFormulaText(formula.yExpression));
-		return `${TEXT_CODE_VERSION}${bytesToBase64Url(writer.toBytes())}`;
+		if (isCustom) {
+			writer.writeGamma(assertFormulaNormalizationValue(formula.xNormalizationValue ?? 1));
+			writer.writeGamma(assertFormulaNormalizationValue(formula.yNormalizationValue ?? 1));
+			writer.writeString(assertFormulaText(formula.xExpression));
+			writer.writeString(assertFormulaText(formula.yExpression));
+		} else {
+			writeExpression(writer, formula.xAst, true);
+			writeExpression(writer, formula.yAst, true);
+		}
+
+		return `${V2_CODE_VERSION}${bytesToBase64Url(writer.toBytes())}`;
 	}
 
+	writer.writeFloat64(formula.hueHeadstartValue);
 	writeExpression(writer, formula.xAst, true);
 	writeExpression(writer, formula.yAst, true);
 	return `${AST_CODE_VERSION}${bytesToBase64Url(writer.toBytes())}`;
 }
 
-function readStateHeader(reader) {
+function readStateHeader(reader, hasTransform = false) {
 	const colorMode = reader.readBits(3);
 	if (colorMode >= N_COLOR_MODES) throw new RangeError('Color mode is out of range.');
 
@@ -597,21 +634,32 @@ function readStateHeader(reader) {
 	const tHeadstartValue = reader.readBits(3);
 	if (tHeadstartValue >= 6) throw new RangeError('Time headstart is out of range.');
 
+	const rotation = hasTransform ? reader.readBits(2) : DEFAULT_ROTATION;
+	const zoomLevel = hasTransform ? reader.readBits(6) - ZOOM_LEVEL_BIAS : DEFAULT_ZOOM_LEVEL;
+	const origin = hasTransform ? [reader.readFloat64(), reader.readFloat64()] : [...DEFAULT_ORIGIN];
 	const hueHeadstartValue = reader.readFloat64();
-
-	return { colorMode, glitchMode, distFormulaIndex, tScaleValue, tHeadstartValue, hueHeadstartValue };
-}
-
-function decodeAstCode(reader) {
-	const { colorMode, glitchMode, distFormulaIndex, tScaleValue, tHeadstartValue, hueHeadstartValue } =
-		readStateHeader(reader);
-	const xAst = readExpression(reader, true);
-	const yAst = readExpression(reader, true);
-	reader.assertOnlyZeroPadding();
 
 	return {
 		colorMode,
 		glitchMode,
+		origin,
+		rotation,
+		zoomLevel,
+		distFormulaIndex,
+		tScaleValue,
+		tHeadstartValue,
+		hueHeadstartValue,
+	};
+}
+
+function decodeAstState(reader, header) {
+	const xAst = readExpression(reader, true);
+	const yAst = readExpression(reader, true);
+	const { distFormulaIndex, hueHeadstartValue, tHeadstartValue, tScaleValue, ...state } = header;
+	reader.assertOnlyZeroPadding();
+
+	return {
+		...state,
 		formula: createFormula({
 			distFormulaIndex,
 			hueHeadstartValue,
@@ -623,18 +671,16 @@ function decodeAstCode(reader) {
 	};
 }
 
-function decodeTextCode(reader) {
-	const { colorMode, glitchMode, distFormulaIndex, tScaleValue, tHeadstartValue, hueHeadstartValue } =
-		readStateHeader(reader);
+function decodeTextState(reader, header) {
 	const xNormalizationValue = assertFormulaNormalizationValue(reader.readGamma());
 	const yNormalizationValue = assertFormulaNormalizationValue(reader.readGamma());
 	const xExpression = reader.readString();
 	const yExpression = reader.readString();
+	const { distFormulaIndex, hueHeadstartValue, tHeadstartValue, tScaleValue, ...state } = header;
 	reader.assertOnlyZeroPadding();
 
 	return {
-		colorMode,
-		glitchMode,
+		...state,
 		formula: createCustomFormula({
 			distFormulaIndex,
 			hueHeadstartValue,
@@ -648,12 +694,30 @@ function decodeTextCode(reader) {
 	};
 }
 
+function decodeAstCode(reader) {
+	return decodeAstState(reader, readStateHeader(reader));
+}
+
+function decodeTextCode(reader) {
+	return decodeTextState(reader, readStateHeader(reader));
+}
+
+function decodeV2Code(bytes) {
+	const reader = new BitReader(bytes);
+	if (reader.readBits(3) === V2_MARKER) {
+		const header = readStateHeader(reader, true);
+		return reader.readBit() === 1 ? decodeTextState(reader, header) : decodeAstState(reader, header);
+	}
+
+	return decodeTextCode(new BitReader(bytes));
+}
+
 function decodeCodeOrThrow(code) {
 	if (!SAFE_CODE_RE.test(code)) throw new RangeError('Code contains unsafe characters or an unsupported version.');
 
-	const reader = new BitReader(base64UrlToBytes(code.slice(1)));
-	if (code[0] === AST_CODE_VERSION) return decodeAstCode(reader);
-	if (code[0] === TEXT_CODE_VERSION) return decodeTextCode(reader);
+	const bytes = base64UrlToBytes(code.slice(1));
+	if (code[0] === AST_CODE_VERSION) return decodeAstCode(new BitReader(bytes));
+	if (code[0] === V2_CODE_VERSION) return decodeV2Code(bytes);
 	throw new RangeError('Unsupported code version.');
 }
 

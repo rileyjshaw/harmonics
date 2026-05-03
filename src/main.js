@@ -14,10 +14,18 @@ import {
 import { FORMULA_EDITOR_ROWS, formatFormulaEditorLine, normalizeFormulaEditorValue } from './formula-editor.js';
 
 const MAX_FORMULA_HISTORY_LENGTH = 64;
+const DEFAULT_ROTATION = 0;
+const DEFAULT_ZOOM_LEVEL = 0;
+const DEFAULT_ORIGIN = Object.freeze([0, 0]);
+const MIN_ZOOM_LEVEL = -32;
+const MAX_ZOOM_LEVEL = 31;
 const canvas = createFullscreenCanvas();
 
 let colorMode = 0;
 let glitchMode = 0;
+let rotation = DEFAULT_ROTATION;
+let zoomLevel = DEFAULT_ZOOM_LEVEL;
+let origin = [...DEFAULT_ORIGIN];
 let shader;
 let isPaused = false;
 let formulaHistoryIndex = -1;
@@ -48,6 +56,11 @@ function updateShaderUniforms(time = lastTime, frame = lastFrame) {
 	lastFrame = frame;
 }
 
+function updateSceneTransformUniforms() {
+	if (!shader) return;
+	shader.updateUniforms({ u_origin: origin, u_rotation: rotation, u_zoom: 2 ** zoomLevel });
+}
+
 function togglePause() {
 	if (!shader) return;
 	isPaused = !isPaused;
@@ -67,7 +80,7 @@ function drawIfPaused() {
 function getCurrentCode() {
 	if (!currentFormula) return null;
 	try {
-		return encodeState({ colorMode, glitchMode, formula: currentFormula });
+		return encodeState({ colorMode, glitchMode, origin, rotation, zoomLevel, formula: currentFormula });
 	} catch (error) {
 		console.warn('Could not encode Harmonics state.', error);
 		return null;
@@ -97,16 +110,36 @@ function pushFormulaHistory(formula) {
 	formulaHistoryIndex = formulaHistory.length - 1;
 }
 
-function showState({ colorMode: nextColorMode, glitchMode: nextGlitchMode, formula }, { updateHash = true } = {}) {
+function showState(
+	{
+		colorMode: nextColorMode,
+		glitchMode: nextGlitchMode,
+		origin: nextOrigin = DEFAULT_ORIGIN,
+		rotation: nextRotation = DEFAULT_ROTATION,
+		zoomLevel: nextZoomLevel = DEFAULT_ZOOM_LEVEL,
+		formula,
+	},
+	{ updateHash = true } = {},
+) {
 	const previousColorMode = colorMode;
 	const previousGlitchMode = glitchMode;
+	const previousOrigin = origin;
+	const previousRotation = rotation;
+	const previousZoomLevel = zoomLevel;
 	colorMode = nextColorMode;
 	glitchMode = nextGlitchMode;
+	origin = [...nextOrigin];
+	rotation = nextRotation;
+	zoomLevel = nextZoomLevel;
 	const result = renderFormula(formula);
 	if (!result.ok) {
 		colorMode = previousColorMode;
 		glitchMode = previousGlitchMode;
+		origin = previousOrigin;
+		rotation = previousRotation;
+		zoomLevel = previousZoomLevel;
 		updateShaderUniforms();
+		updateSceneTransformUniforms();
 		return false;
 	}
 	pushFormulaHistory(formula);
@@ -143,6 +176,9 @@ uniform vec2 u_resolution;
 uniform vec2 u_cursor;
 uniform int u_colorMode;
 uniform int u_glitchMode;
+uniform vec2 u_origin;
+uniform int u_rotation;
+uniform float u_zoom;
 uniform float u_sqrt2;
 uniform float u_tau;
 uniform float u_pi;
@@ -283,9 +319,16 @@ vec2 p6mmmap(vec2 uv, float repeats) {
   return st * 2.0;
 }
 
+vec2 rotateScene(vec2 uv) {
+  if (u_rotation == 1) return vec2(uv.y, -uv.x);
+  if (u_rotation == 2) return -uv;
+  if (u_rotation == 3) return vec2(-uv.y, uv.x);
+  return uv;
+}
+
 void main() {
   // Infer settings from the cursor position.
-  float zoomLevel = 2.0 + u_cursor.x * 16.;
+  float zoomLevel = 10.0 * pow(2.0, u_cursor.x * 2.0 - 1.0) / u_zoom;
   float maxGridDivisions = 1. + floor(u_cursor.y * max(u_resolution.x, u_resolution.y) / 20.);
   float numKaleidoscopeSides = 1. + round(u_cursor.x * 7.);
   float numP6mmRepeats = 1. + round(u_cursor.x * 5.);
@@ -301,6 +344,7 @@ void main() {
   uv = mix(uv, p6mmmap(uv, numP6mmRepeats), isP6mm);
   uv = (uv - .5) * zoomLevel; // Zoom and center the uv at 0.
   uv.y *= u_resolution.y / u_resolution.x; // Prevent distortion and stretching due to the aspect ratio.
+  uv = rotateScene(uv) + u_origin;
 
   float t = sin(u_time / ${tScale}) * ${tScale} + ${tHeadstart};
   vec2 result = fn(uv, t);
@@ -349,6 +393,9 @@ function createInitializedShader(fragmentShaderSrc) {
 		nextShader.initializeUniform('u_pi', 'float', Math.PI, { allowMissing: true });
 		nextShader.initializeUniform('u_colorMode', 'int', colorMode);
 		nextShader.initializeUniform('u_glitchMode', 'int', glitchMode);
+		nextShader.initializeUniform('u_origin', 'float', origin);
+		nextShader.initializeUniform('u_rotation', 'int', rotation);
+		nextShader.initializeUniform('u_zoom', 'float', 2 ** zoomLevel);
 		nextShader.updateUniforms({ u_time: lastTime, u_frame: lastFrame }, { allowMissing: true });
 		nextShader.updateUniforms({ u_cursor: lastCursor }, { allowMissing: true });
 
@@ -495,6 +542,7 @@ function createFormulaEditor() {
 	root.addEventListener('keydown', event => {
 		if (event.key === 'Enter' || event.key === 'Escape') {
 			event.preventDefault();
+			event.stopPropagation();
 			closeFormulaEditor();
 		}
 	});
@@ -655,24 +703,54 @@ window.addEventListener('keydown', event => {
 			drawIfPaused();
 			replaceHashFromCurrentState();
 			break;
-		case 'KeyQ':
-			colorMode = glitchMode = 0;
-			updateShaderUniforms();
+		case 'KeyO':
+			origin = [...DEFAULT_ORIGIN];
+			updateSceneTransformUniforms();
 			drawIfPaused();
 			replaceHashFromCurrentState();
 			break;
-		case 'KeyR':
-			if (event.shiftKey) {
-				showPreviousFormula();
-			} else {
-				showNewFormula();
-			}
+		case 'KeyQ':
+			colorMode = glitchMode = 0;
+			origin = [...DEFAULT_ORIGIN];
+			rotation = DEFAULT_ROTATION;
+			zoomLevel = DEFAULT_ZOOM_LEVEL;
+			updateShaderUniforms();
+			updateSceneTransformUniforms();
+			drawIfPaused();
+			replaceHashFromCurrentState();
 			break;
-		case 'KeyS':
+		case 'Enter':
 			{
 				const code = getCurrentCode();
 				save(shader, code ? `harmonics-${code}` : 'harmonics-custom', getShareUrl(code));
 			}
+			break;
+		case 'KeyR':
+			rotation = (rotation + 4 + (event.shiftKey ? -1 : 1)) % 4;
+			updateSceneTransformUniforms();
+			drawIfPaused();
+			replaceHashFromCurrentState();
+			break;
+		case 'KeyW':
+		case 'KeyA':
+		case 'KeyS':
+		case 'KeyD':
+			{
+				const step = (event.shiftKey ? 2.5 : 0.5) / 2 ** zoomLevel;
+				origin = [
+					origin[0] + (event.code === 'KeyD' ? step : event.code === 'KeyA' ? -step : 0),
+					origin[1] + (event.code === 'KeyW' ? step : event.code === 'KeyS' ? -step : 0),
+				];
+				updateSceneTransformUniforms();
+				drawIfPaused();
+				replaceHashFromCurrentState();
+			}
+			break;
+		case 'KeyZ':
+			zoomLevel = Math.max(MIN_ZOOM_LEVEL, Math.min(MAX_ZOOM_LEVEL, zoomLevel + (event.shiftKey ? -1 : 1)));
+			updateSceneTransformUniforms();
+			drawIfPaused();
+			replaceHashFromCurrentState();
 			break;
 		case 'ArrowLeft':
 			showPreviousFormula();

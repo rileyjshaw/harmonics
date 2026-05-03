@@ -10,19 +10,25 @@ This is a quick project I made to test my [ShaderPad](https://github.com/rileyjs
 
 ## Keyboard controls
 
-| Key                       | Action                          |
-| ------------------------- | ------------------------------- |
-| `C`                       | Cycle to next color mode        |
-| `E`                       | Open the formula editor         |
-| `F`                       | Toggle fullscreen               |
-| `G`                       | Cycle to next glitch mode\*     |
-| `R`, `Up Arrow`           | Generate a new formula          |
-| `Shift + R`, `Left Arrow` | Go back to the previous formula |
-| `Right Arrow`             | Go forward to the next formula  |
-| `Space`                   | Pause or resume                 |
-| `S`                       | Save the current frame as a PNG |
+| Key                       | Action                                         |
+| ------------------------- | ---------------------------------------------- |
+| `C`                       | Cycle to next color mode                       |
+| `E`                       | Open the formula editor                        |
+| `Enter`                   | Save the current frame as a PNG                |
+| `F`                       | Toggle fullscreen                              |
+| `G`                       | Cycle to next glitch mode\*                    |
+| `O`                       | Reset origin                                   |
+| `Q`                       | Reset color, glitch, rotation, zoom, and origin |
+| `R` / `Shift + R`         | Rotate the scene 90 degrees                    |
+| `Up Arrow`                | Generate a new formula                         |
+| `Left Arrow`              | Go back to the previous formula                |
+| `Right Arrow`             | Go forward to the next formula                 |
+| `Space`                   | Pause or resume                                |
+| `W`, `A`, `S`, `D`        | Move the origin\*\*                            |
+| `Z` / `Shift + Z`         | Zoom in or out 2x                              |
 
 \*Glitch mode parameters are controlled with your mouse.
+\*\*Hold `Shift` to move the origin 5x farther.
 
 ## Running locally
 

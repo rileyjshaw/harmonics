@@ -17,7 +17,7 @@ import {
 } from '../src/share-state.js';
 
 const SAFE_CODE_RE = /^1[A-Za-z0-9_-]+$/;
-const SAFE_TEXT_CODE_RE = /^2[A-Za-z0-9_-]+$/;
+const SAFE_V2_CODE_RE = /^2[A-Za-z0-9_-]+$/;
 
 function seededRandom(seed) {
 	let state = seed >>> 0;
@@ -100,11 +100,14 @@ test('round-trips custom text formulas through URL-safe state codes', () => {
 	});
 	const code = encodeState({ colorMode: 2, glitchMode: 3, formula });
 
-	assert.match(code, SAFE_TEXT_CODE_RE);
+	assert.match(code, SAFE_V2_CODE_RE);
 	const decoded = decodeCode(code);
 	assert.ok(decoded);
 	assert.equal(decoded.colorMode, 2);
 	assert.equal(decoded.glitchMode, 3);
+	assert.deepEqual(decoded.origin, [0, 0]);
+	assert.equal(decoded.rotation, 0);
+	assert.equal(decoded.zoomLevel, 0);
 	assert.equal(decoded.formula.isCustom, true);
 	assert.equal(decoded.formula.xExpression, formula.xExpression);
 	assert.equal(decoded.formula.yExpression, formula.yExpression);
@@ -131,9 +134,68 @@ test('round-trips generated states through safe URL and filename code characters
 		assert.ok(decoded);
 		assert.equal(decoded.colorMode, colorMode);
 		assert.equal(decoded.glitchMode, glitchMode);
+		assert.deepEqual(decoded.origin, [0, 0]);
+		assert.equal(decoded.rotation, 0);
+		assert.equal(decoded.zoomLevel, 0);
 		assertFormulaEqual(decoded.formula, formula);
 		assert.equal(encodeState(decoded), code);
 	}
+});
+
+test('omits default scene transforms from generated v1 state codes', () => {
+	const formula = createRandomFormula(1, seededRandom(25));
+	const state = { colorMode: 3, glitchMode: 1, formula };
+	const code = encodeState(state);
+
+	assert.equal(encodeState({ ...state, origin: [0, 0], rotation: 0, zoomLevel: 0 }), code);
+});
+
+test('round-trips scene transforms through generated v2 state codes', () => {
+	const formula = createRandomFormula(2, seededRandom(26));
+	const state = { colorMode: 4, glitchMode: 2, formula };
+	const code = encodeState({ ...state, origin: [1.5, -2.25], rotation: 3, zoomLevel: -4 });
+
+	assert.match(code, SAFE_V2_CODE_RE);
+	assert.equal(extractCodeFromFilename(`harmonics-${code}.png`), code);
+	assert.notEqual(code, encodeState(state));
+
+	const decoded = decodeCode(code);
+	assert.ok(decoded);
+	assert.equal(decoded.colorMode, state.colorMode);
+	assert.equal(decoded.glitchMode, state.glitchMode);
+	assert.deepEqual(decoded.origin, [1.5, -2.25]);
+	assert.equal(decoded.rotation, 3);
+	assert.equal(decoded.zoomLevel, -4);
+	assertFormulaEqual(decoded.formula, formula);
+	assert.equal(encodeState(decoded), code);
+});
+
+test('round-trips scene transforms through custom text state codes', () => {
+	const formula = createCustomFormula({
+		distFormulaIndex: 2,
+		tScaleValue: 7,
+		tHeadstartValue: 4,
+		hueHeadstartValue: 0.75,
+		xExpression: 'sin(x * 2.)',
+		yExpression: 'cos(y * .5)',
+		xNormalizationValue: 2,
+		yNormalizationValue: 2,
+	});
+	const code = encodeState({ colorMode: 5, glitchMode: 6, origin: [-0.5, 0.25], rotation: 1, zoomLevel: 6, formula });
+
+	assert.match(code, SAFE_V2_CODE_RE);
+
+	const decoded = decodeCode(code);
+	assert.ok(decoded);
+	assert.equal(decoded.colorMode, 5);
+	assert.equal(decoded.glitchMode, 6);
+	assert.deepEqual(decoded.origin, [-0.5, 0.25]);
+	assert.equal(decoded.rotation, 1);
+	assert.equal(decoded.zoomLevel, 6);
+	assert.equal(decoded.formula.isCustom, true);
+	assert.equal(decoded.formula.xExpression, formula.xExpression);
+	assert.equal(decoded.formula.yExpression, formula.yExpression);
+	assert.equal(encodeState(decoded), code);
 });
 
 test('extracts codes from screenshot filenames only', () => {
