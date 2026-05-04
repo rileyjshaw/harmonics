@@ -229,9 +229,16 @@ test('extracts codes from screenshot filenames only', () => {
 	assert.equal(extractCodeFromFilename(`harmonics-${code}.png`), code);
 	assert.equal(extractCodeFromFilename(`harmonics-${code}.webp`), code);
 	assert.equal(extractCodeFromFilename(`harmonics-${code}`), code);
+	assert.equal(extractCodeFromFilename(`harmonics-${code} copy.png`), code);
+	assert.equal(extractCodeFromFilename(`harmonics-${code} Copy 2.png`), code);
+	assert.equal(extractCodeFromFilename(`harmonics-${code} (1).png`), code);
+	assert.equal(extractCodeFromFilename(`harmonics-${code}(1).png`), code);
+	assert.equal(extractCodeFromFilename(`harmonics-${code} copy (1).png`), code);
 	assert.equal(extractCodeFromFilename(`harmonics-${code}.backup.png`), null);
 	assert.equal(extractCodeFromFilename(`other-${code}.png`), null);
+	assert.equal(extractCodeFromFilename(`Harmonics-${code}.png`), null);
 	assert.equal(extractCodeFromFilename(`harmonics-${code}%.png`), null);
+	assert.equal(extractCodeFromFilename(`harmonics-${code} backup.png`), null);
 });
 
 test('rejects invalid codes', () => {

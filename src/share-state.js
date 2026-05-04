@@ -731,6 +731,6 @@ export function decodeCode(code) {
 }
 
 export function extractCodeFromFilename(filename) {
-	const match = /^harmonics-([A-Za-z0-9_-]+)(?:\.[^.]+)?$/.exec(filename);
+	const match = /^harmonics-([A-Za-z0-9_-]+)(?:(?:\s+[Cc][Oo][Pp][Yy](?:\s+\d+)?)|(?:\s*\(\d+\)))*(?:\.[^.]+)?$/.exec(filename);
 	return match?.[1] ?? null;
 }
