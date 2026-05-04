@@ -36,12 +36,14 @@ export const DIST_FORMULAS = Object.freeze([
 	['(result.x + result.y) / 2.', 1],
 ]);
 
-export const N_COLOR_MODES = 6;
+export const N_COLOR_MODES = 13;
 export const N_GLITCH_MODES = 7;
 
 const AST_CODE_VERSION = '1';
 const V2_CODE_VERSION = '2';
-const V2_MARKER = 7;
+const V1_COLOR_MODE_BITS = 3;
+const V2_COLOR_MODE_BITS = 4;
+const MAX_V1_COLOR_MODE = 1 << V1_COLOR_MODE_BITS;
 const SAFE_CODE_RE = /^[12][A-Za-z0-9_-]+$/;
 const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
 const BASE64URL_LOOKUP = new Map([...BASE64URL_ALPHABET].map((char, index) => [char, index]));
@@ -584,11 +586,17 @@ export function encodeState({
 	}
 	const isCustom = formula.isCustom || !formula.xAst || !formula.yAst;
 	const isDefaultOrigin = origin[0] === 0 && origin[1] === 0;
-	const isV2 = rotation !== DEFAULT_ROTATION || zoomLevel !== DEFAULT_ZOOM_LEVEL || !isDefaultOrigin || isCustom;
+	// V1 fits color modes 0–7 in 3 bits and skips scene transforms; V2 widens
+	// colorMode to 4 bits and is required for transforms or custom formulas.
+	const isV2 =
+		colorMode >= MAX_V1_COLOR_MODE ||
+		rotation !== DEFAULT_ROTATION ||
+		zoomLevel !== DEFAULT_ZOOM_LEVEL ||
+		!isDefaultOrigin ||
+		isCustom;
 
 	const writer = new BitWriter();
-	if (isV2) writer.writeBits(V2_MARKER, 3);
-	writer.writeBits(colorMode, 3);
+	writer.writeBits(colorMode, isV2 ? V2_COLOR_MODE_BITS : V1_COLOR_MODE_BITS);
 	writer.writeBits(glitchMode, 3);
 	writer.writeBits(formula.distFormulaIndex, 2);
 	writer.writeBits(formula.tScaleValue - 1, 4);
@@ -620,8 +628,8 @@ export function encodeState({
 	return `${AST_CODE_VERSION}${bytesToBase64Url(writer.toBytes())}`;
 }
 
-function readStateHeader(reader, hasTransform = false) {
-	const colorMode = reader.readBits(3);
+function readStateHeader(reader, { hasTransform = false, colorModeBits = V1_COLOR_MODE_BITS } = {}) {
+	const colorMode = reader.readBits(colorModeBits);
 	if (colorMode >= N_COLOR_MODES) throw new RangeError('Color mode is out of range.');
 
 	const glitchMode = reader.readBits(3);
@@ -694,29 +702,22 @@ function decodeTextState(reader, header) {
 	};
 }
 
-function decodeAstCode(reader) {
+function decodeV1Code(bytes) {
+	const reader = new BitReader(bytes);
 	return decodeAstState(reader, readStateHeader(reader));
-}
-
-function decodeTextCode(reader) {
-	return decodeTextState(reader, readStateHeader(reader));
 }
 
 function decodeV2Code(bytes) {
 	const reader = new BitReader(bytes);
-	if (reader.readBits(3) === V2_MARKER) {
-		const header = readStateHeader(reader, true);
-		return reader.readBit() === 1 ? decodeTextState(reader, header) : decodeAstState(reader, header);
-	}
-
-	return decodeTextCode(new BitReader(bytes));
+	const header = readStateHeader(reader, { hasTransform: true, colorModeBits: V2_COLOR_MODE_BITS });
+	return reader.readBit() === 1 ? decodeTextState(reader, header) : decodeAstState(reader, header);
 }
 
 function decodeCodeOrThrow(code) {
 	if (!SAFE_CODE_RE.test(code)) throw new RangeError('Code contains unsafe characters or an unsupported version.');
 
 	const bytes = base64UrlToBytes(code.slice(1));
-	if (code[0] === AST_CODE_VERSION) return decodeAstCode(new BitReader(bytes));
+	if (code[0] === AST_CODE_VERSION) return decodeV1Code(bytes);
 	if (code[0] === V2_CODE_VERSION) return decodeV2Code(bytes);
 	throw new RangeError('Unsupported code version.');
 }

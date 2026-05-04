@@ -35,9 +35,9 @@ let formulaEditor;
 const formulaHistory = [];
 
 const RESOLUTIONS = [
-	{ w: 3600, h: 4800, label: '12"x16"' },
-	{ w: 2400, h: 3000, label: '8"x10"' },
-	{ w: 1500, h: 2100, label: '5"x7"' },
+	{ w: 4800, h: 3600, label: '16"x12"' },
+	{ w: 3000, h: 2400, label: '10"x8"' },
+	{ w: 2100, h: 1500, label: '7"x5"' },
 	{ label: 'Default' },
 ];
 let resolutionIndex = RESOLUTIONS.length - 1;
@@ -46,15 +46,24 @@ let resolutionIndicatorTimer;
 
 function enforceResolution() {
 	const res = RESOLUTIONS[resolutionIndex];
-	if (res.w && res.h && (canvas.width !== res.w || canvas.height !== res.h)) {
-		canvas.width = res.w;
-		canvas.height = res.h;
+	let w, h;
+	if (res.w && res.h) {
+		w = res.w;
+		h = res.h;
+	} else {
+		const scale = window.devicePixelRatio || 1;
+		w = Math.max(1, Math.round(canvas.clientWidth * scale));
+		h = Math.max(1, Math.round(canvas.clientHeight * scale));
+	}
+	if (canvas.width !== w || canvas.height !== h) {
+		canvas.width = w;
+		canvas.height = h;
 	}
 }
 
 function applyResolution() {
 	enforceResolution();
-	if (!RESOLUTIONS[resolutionIndex].w) window.dispatchEvent(new Event('resize'));
+	drawIfPaused();
 	resolutionIndicator ??= document.body.appendChild(
 		Object.assign(document.createElement('div'), { className: 'resolution-indicator' }),
 	);
@@ -89,6 +98,21 @@ function updateShaderUniforms(time = lastTime, frame = lastFrame) {
 function updateSceneTransformUniforms() {
 	if (!shader) return;
 	shader.updateUniforms({ u_origin: origin, u_rotation: rotation, u_zoom: 2 ** zoomLevel });
+}
+
+// Mirrors the shader’s `rotateScene` so screen-space pan vectors land in the
+// same function-space coordinate system that `u_origin` is added in.
+function rotateSceneVec(x, y, rotation) {
+	switch (rotation) {
+		case 1:
+			return [y, -x];
+		case 2:
+			return [-x, -y];
+		case 3:
+			return [-y, x];
+		default:
+			return [x, y];
+	}
 }
 
 function togglePause() {
@@ -406,6 +430,55 @@ void main() {
     L = result.x + result.y;
 	C = result.x - result.y;
 	H = dist;
+  } else if (u_colorMode == 6) {
+    // CYANOTYPE — paper-white highlights to deep Prussian-blue shadows.
+    L = pow(0.96 - dist * 0.86, 1.3);
+    C = mix(0.02, 0.14, dist);
+    H = 0.71;
+  } else if (u_colorMode == 7) {
+    // AURORA — slow shimmer through greens, teals, magentas.
+    float pulse = sin(u_time / 6. + dist * u_pi);
+    L = clamp(0.18 + dist * 0.62 + pulse * 0.04, 0., 1.);
+    C = 0.16 + 0.05 * pulse;
+    H = mix(0.42, 0.92, dist) + pulse * 0.04;
+  } else if (u_colorMode == 8) {
+    // EMBER — heat map: black → deep red → orange → cream.
+    L = pow(dist, 1.35);
+    C = mix(0.18, 0.05, smoothstep(0.6, 1.0, dist));
+    H = mix(0.05, 0.20, smoothstep(0.0, 1.0, dist));
+  } else if (u_colorMode == 9) {
+    // TONAL MONO — sophisticated B&W with warm shadows and cool highlights.
+    L = pow(mix(0.10, 0.94, dist), 1.1);
+    C = 0.045 + 0.025 * sin(dist * u_tau + u_time / 8.);
+    H = mix(0.10, 0.65, smoothstep(0.15, 0.85, dist));
+  } else if (u_colorMode == 10) {
+    // OCTAVES — four harmonic sines stacked on lightness, like additive
+    // synthesis on the pattern itself. Chroma rises in the shadows and the
+    // dominant low-frequency wave drifts the hue band.
+    float o1 = sin(dist * u_tau + t * .3);
+    float o2 = sin(dist * u_tau * 2. + t * .5) * .5;
+    float o3 = sin(dist * u_tau * 4. + t * .7) * .25;
+    float o4 = sin(dist * u_tau * 8. + t * 1.1) * .125;
+    float harmonic = (o1 + o2 + o3 + o4) / 1.875;
+    L = .5 + harmonic * .42;
+    C = .10 + .10 * (1. - L);
+    H = .18 * harmonic + u_time / 250. + ${hueHeadstart};
+  } else if (u_colorMode == 11) {
+    // POLYRHYTHM — incommensurate frequency ratios (1, √2, 1/φ) on L, C, H,
+    // each on its own coprime time period. The result never quite repeats.
+    L = .5 + .40 * sin(dist * u_tau + u_time / 7.);
+    C = .13 + .06 * cos(dist * u_tau * u_sqrt2 + u_time / 11.);
+    H = .20 * sin(dist * u_tau * .61803 + u_time / 13.) + u_time / 400. + ${hueHeadstart};
+  } else if (u_colorMode == 12) {
+    // STANDING WAVE — two wave fronts multiply into nodes and antinodes;
+    // chroma collapses toward grey at every zero crossing for a quieter
+    // palette than a purely additive mix.
+    float w1 = sin(dist * u_tau * 2. + t * .5);
+    float w2 = sin(dist * u_tau * 3. - t * .3);
+    float interference = w1 * w2;
+    L = .5 + .40 * interference;
+    C = .04 + .16 * abs(interference);
+    H = .18 * interference + u_time / 300. + ${hueHeadstart};
   }
 
   L = clamp(L, 0., 1.);
@@ -431,10 +504,12 @@ function createInitializedShader(fragmentShaderSrc) {
 
 		nextShader.on('autosize:resize', () => {
 			enforceResolution();
-			drawIfPaused();
 		});
 		nextShader.on('updateUniforms', updates => {
 			if (Object.hasOwn(updates, 'u_cursor')) drawIfPaused();
+		});
+		nextShader.on('updateResolution', () => {
+			drawIfPaused();
 		});
 	} catch (error) {
 		nextShader.destroy();
@@ -774,10 +849,10 @@ window.addEventListener('keydown', event => {
 		case 'KeyD':
 			{
 				const step = (event.shiftKey ? 2.5 : 0.5) / 2 ** zoomLevel;
-				origin = [
-					origin[0] + (event.code === 'KeyD' ? step : event.code === 'KeyA' ? -step : 0),
-					origin[1] + (event.code === 'KeyW' ? step : event.code === 'KeyS' ? -step : 0),
-				];
+				const screenDx = event.code === 'KeyD' ? step : event.code === 'KeyA' ? -step : 0;
+				const screenDy = event.code === 'KeyW' ? step : event.code === 'KeyS' ? -step : 0;
+				const [dx, dy] = rotateSceneVec(screenDx, screenDy, rotation);
+				origin = [origin[0] + dx, origin[1] + dy];
 				updateSceneTransformUniforms();
 				drawIfPaused();
 				replaceHashFromCurrentState();

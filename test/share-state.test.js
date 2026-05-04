@@ -18,6 +18,7 @@ import {
 
 const SAFE_CODE_RE = /^1[A-Za-z0-9_-]+$/;
 const SAFE_V2_CODE_RE = /^2[A-Za-z0-9_-]+$/;
+const SAFE_V1_OR_V2_CODE_RE = /^[12][A-Za-z0-9_-]+$/;
 
 function seededRandom(seed) {
 	let state = seed >>> 0;
@@ -68,7 +69,7 @@ function simpleOuterAst() {
 }
 
 test('exports the current v1 formula tables', () => {
-	assert.equal(N_COLOR_MODES, 6);
+	assert.equal(N_COLOR_MODES, 13);
 	assert.equal(N_GLITCH_MODES, 7);
 	assert.deepEqual(
 		OUTER_FUNCTIONS.map(([name]) => name),
@@ -125,7 +126,9 @@ test('round-trips generated states through safe URL and filename code characters
 		const glitchMode = seed % N_GLITCH_MODES;
 		const code = encodeState({ colorMode, glitchMode, formula });
 
-		assert.match(code, SAFE_CODE_RE);
+		// V1 covers colorMode 0–7 (the original 3-bit field); V2 takes over for 8+.
+		assert.match(code, SAFE_V1_OR_V2_CODE_RE);
+		assert.match(code, colorMode < 8 ? SAFE_CODE_RE : SAFE_V2_CODE_RE);
 		assert.equal(code.includes('='), false);
 		assert.equal(code.includes('/'), false);
 		assert.equal(code.includes('+'), false);
@@ -168,6 +171,27 @@ test('round-trips scene transforms through generated v2 state codes', () => {
 	assert.equal(decoded.zoomLevel, -4);
 	assertFormulaEqual(decoded.formula, formula);
 	assert.equal(encodeState(decoded), code);
+});
+
+test('round-trips high-numbered color modes through v2 state codes', () => {
+	for (let colorMode = 8; colorMode < N_COLOR_MODES; colorMode++) {
+		const formula = createRandomFormula(colorMode % N_GLITCH_MODES, seededRandom(400 + colorMode));
+		const glitchMode = colorMode % N_GLITCH_MODES;
+		const code = encodeState({ colorMode, glitchMode, formula });
+
+		assert.match(code, SAFE_V2_CODE_RE);
+		assert.equal(extractCodeFromFilename(`harmonics-${code}.png`), code);
+
+		const decoded = decodeCode(code);
+		assert.ok(decoded);
+		assert.equal(decoded.colorMode, colorMode);
+		assert.equal(decoded.glitchMode, glitchMode);
+		assert.deepEqual(decoded.origin, [0, 0]);
+		assert.equal(decoded.rotation, 0);
+		assert.equal(decoded.zoomLevel, 0);
+		assertFormulaEqual(decoded.formula, formula);
+		assert.equal(encodeState(decoded), code);
+	}
 });
 
 test('round-trips scene transforms through custom text state codes', () => {
@@ -222,10 +246,6 @@ test('rejects invalid codes', () => {
 test('rejects impossible enum values while decoding', () => {
 	const formula = createRandomFormula(0, seededRandom(300));
 	const code = encodeState({ colorMode: 0, glitchMode: 0, formula });
-	const payload = decodePayload(code);
-
-	payload[0] = (6 << 5) | (payload[0] & 0x1f);
-	assert.equal(decodeCode(encodePayload(payload)), null);
 
 	const glitchPayload = decodePayload(code);
 	glitchPayload[0] = (glitchPayload[0] & 0xe3) | (7 << 2);
