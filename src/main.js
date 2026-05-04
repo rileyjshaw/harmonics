@@ -502,14 +502,11 @@ function createInitializedShader(fragmentShaderSrc) {
 		nextShader.updateUniforms({ u_time: lastTime, u_frame: lastFrame }, { allowMissing: true });
 		nextShader.updateUniforms({ u_cursor: lastCursor }, { allowMissing: true });
 
-		nextShader.on('autosize:resize', () => {
-			enforceResolution();
-		});
+		enforceResolution();
+		nextShader.on('autosize:resize', enforceResolution);
+		nextShader.on('updateResolution', drawIfPaused);
 		nextShader.on('updateUniforms', updates => {
 			if (Object.hasOwn(updates, 'u_cursor')) drawIfPaused();
-		});
-		nextShader.on('updateResolution', () => {
-			drawIfPaused();
 		});
 	} catch (error) {
 		nextShader.destroy();
