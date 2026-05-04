@@ -60,9 +60,9 @@ const MAX_ZOOM_LEVEL = ZOOM_LEVEL_BIAS - 1;
 
 const RANDOM_FACTORS = {
 	normal: {
-		outer: 9,
-		inner: 6,
-		depth: 3,
+		outer: 9, // Higher = more lines.
+		inner: 6, // Higher = watery.
+		depth: 3, // Higher = grainy, slow.
 	},
 	glitched: {
 		outer: 3,
@@ -731,6 +731,8 @@ export function decodeCode(code) {
 }
 
 export function extractCodeFromFilename(filename) {
-	const match = /^harmonics-([A-Za-z0-9_-]+)(?:(?:\s+[Cc][Oo][Pp][Yy](?:\s+\d+)?)|(?:\s*\(\d+\)))*(?:\.[^.]+)?$/.exec(filename);
+	const match = /^harmonics-([A-Za-z0-9_-]+)(?:(?:\s+[Cc][Oo][Pp][Yy](?:\s+\d+)?)|(?:\s*\(\d+\)))*(?:\.[^.]+)?$/.exec(
+		filename,
+	);
 	return match?.[1] ?? null;
 }
