@@ -88,6 +88,12 @@ canvas.addEventListener('pointermove', event => {
 	updateLastCursor(event.clientX, event.clientY);
 });
 
+canvas.addEventListener('dblclick', event => {
+	if (isFormulaEditorFocused()) return;
+	event.preventDefault();
+	showNewFormula();
+});
+
 function updateShaderUniforms(time = lastTime, frame = lastFrame) {
 	if (!shader) return;
 	shader.updateUniforms({ u_colorMode: colorMode, u_glitchMode: glitchMode });
