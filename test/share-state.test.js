@@ -12,6 +12,7 @@ import {
 	decodeCode,
 	encodeState,
 	extractCodeFromFilename,
+	removeRandomOuterExpression,
 	stringifyFormulaAst,
 	stringifyFormulaAstExpression,
 } from '../src/share-state.js';
@@ -68,6 +69,32 @@ function simpleOuterAst() {
 	};
 }
 
+function outerAst(functionIndexes, operators = functionIndexes.slice(1).map(() => 0)) {
+	return {
+		type: 'expression',
+		isOuter: true,
+		elements: functionIndexes.map(fn => ({
+			type: 'outer-call',
+			fn,
+			child: { type: 'variable', variable: 1 },
+			timeOperator: 0,
+			timeVariable: 0,
+		})),
+		operators,
+	};
+}
+
+function formulaWithAsts(xAst, yAst) {
+	return {
+		distFormulaIndex: 0,
+		hueHeadstartValue: 0.5,
+		tHeadstartValue: 0,
+		tScaleValue: 1,
+		xAst,
+		yAst,
+	};
+}
+
 test('exports the current v1 formula tables', () => {
 	assert.equal(N_COLOR_MODES, 13);
 	assert.equal(N_GLITCH_MODES, 7);
@@ -86,6 +113,57 @@ test('exports the current v1 formula tables', () => {
 test('stringifies a formula AST using the shader formula format', () => {
 	assert.equal(stringifyFormulaAstExpression(simpleOuterAst()), 'sine(t, t + t)');
 	assert.equal(stringifyFormulaAst(simpleOuterAst()), '(sine(t, t + t) + 1.) / (1. * 2.)');
+});
+
+test('removes a random outer expression and its preceding operator', () => {
+	const xAst = outerAst([0, 1, 2], [0, 1]);
+	const yAst = outerAst([3]);
+	const formula = formulaWithAsts(xAst, yAst);
+	const reduced = removeRandomOuterExpression(formula, () => 0.4);
+
+	assert.deepEqual(
+		reduced.xAst.elements.map(element => element.fn),
+		[0, 2],
+	);
+	assert.deepEqual(reduced.xAst.operators, [1]);
+	assert.equal(reduced.xExpression, 'sine(x, t + t) - tangent(x, t + t)');
+	assert.equal(reduced.xNormalizationValue, 2);
+	assert.equal(reduced.xOut, '(sine(x, t + t) - tangent(x, t + t) + 2.) / (2. * 2.)');
+	assert.strictEqual(reduced.yAst, yAst);
+	assert.deepEqual(xAst.elements.map(element => element.fn), [0, 1, 2]);
+	assert.deepEqual(xAst.operators, [0, 1]);
+});
+
+test('removes the following operator when the first outer expression is selected', () => {
+	const formula = formulaWithAsts(outerAst([0, 1, 2], [0, 1]), outerAst([3]));
+	const reduced = removeRandomOuterExpression(formula, () => 0);
+
+	assert.deepEqual(
+		reduced.xAst.elements.map(element => element.fn),
+		[1, 2],
+	);
+	assert.deepEqual(reduced.xAst.operators, [1]);
+	assert.equal(reduced.xExpression, 'cosine(x, t + t) - tangent(x, t + t)');
+});
+
+test('chooses randomly across removable X and Y outer expressions', () => {
+	const xAst = outerAst([0, 1]);
+	const yAst = outerAst([2, 3, 4], [1, 0]);
+	const reduced = removeRandomOuterExpression(formulaWithAsts(xAst, yAst), () => 0.4);
+
+	assert.strictEqual(reduced.xAst, xAst);
+	assert.deepEqual(
+		reduced.yAst.elements.map(element => element.fn),
+		[3, 4],
+	);
+	assert.deepEqual(reduced.yAst.operators, [0]);
+	assert.equal(reduced.yNormalizationValue, 2);
+});
+
+test('does not remove the only outer expression in a coordinate or custom formula', () => {
+	const irreducible = formulaWithAsts(outerAst([0]), outerAst([1]));
+	assert.equal(removeRandomOuterExpression(irreducible, () => 0), null);
+	assert.equal(removeRandomOuterExpression({ ...irreducible, isCustom: true }, () => 0), null);
 });
 
 test('round-trips custom text formulas through URL-safe state codes', () => {

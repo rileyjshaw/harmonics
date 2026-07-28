@@ -10,6 +10,7 @@ import {
 	decodeCode,
 	encodeState,
 	extractCodeFromFilename,
+	removeRandomOuterExpression,
 } from './share-state.js';
 import { FORMULA_EDITOR_ROWS, formatFormulaEditorLine, normalizeFormulaEditorValue } from './formula-editor.js';
 
@@ -554,6 +555,18 @@ function showNewFormula() {
 	return true;
 }
 
+function showFormulaWithRandomOuterExpressionRemoved() {
+	const formula = removeRandomOuterExpression(currentFormula);
+	if (!formula) return false;
+
+	const result = renderFormula(formula);
+	if (!result.ok) return false;
+
+	pushFormulaHistory(formula);
+	replaceHashFromCurrentState();
+	return true;
+}
+
 function showPreviousFormula() {
 	if (formulaHistoryIndex <= 0) return;
 
@@ -875,6 +888,9 @@ window.addEventListener('keydown', event => {
 			break;
 		case 'ArrowUp':
 			showNewFormula();
+			break;
+		case 'ArrowDown':
+			showFormulaWithRandomOuterExpressionRemoved();
 			break;
 		case 'Space':
 			if (!event.repeat) togglePause();

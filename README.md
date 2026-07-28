@@ -21,6 +21,7 @@ This is a quick project I made to test my [ShaderPad](https://github.com/rileyjs
 | `Q`                       | Reset color, glitch, rotation, zoom, and origin |
 | `R` / `Shift + R`         | Rotate the scene 90 degrees                    |
 | `Up Arrow`                | Generate a new formula                         |
+| `Down Arrow`              | Remove a random outer expression               |
 | `Left Arrow`              | Go back to the previous formula                |
 | `Right Arrow`             | Go forward to the next formula                 |
 | `Space`                   | Pause or resume                                |

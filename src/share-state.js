@@ -285,6 +285,47 @@ export function createRandomFormula(glitchMode, random = Math.random) {
 	});
 }
 
+function removeOuterExpressionAt(ast, index) {
+	const elements = [...ast.elements];
+	elements.splice(index, 1);
+	const operatorIndex = index === 0 ? 0 : index - 1;
+	const operators = [...ast.operators];
+	operators.splice(operatorIndex, 1);
+	return { ...ast, elements, operators };
+}
+
+export function removeRandomOuterExpression(formula, random = Math.random) {
+	if (formula?.isCustom || !formula?.xAst || !formula?.yAst) return null;
+
+	const removableAsts = [
+		['xAst', formula.xAst],
+		['yAst', formula.yAst],
+	].filter(([, ast]) => ast.elements.length > 1);
+	const nRemovableExpressions = removableAsts.reduce((total, [, ast]) => total + ast.elements.length, 0);
+	if (nRemovableExpressions === 0) return null;
+
+	let expressionIndex = Math.floor(random() * nRemovableExpressions);
+	let astKey;
+	let ast;
+	for (const [candidateKey, candidateAst] of removableAsts) {
+		if (expressionIndex < candidateAst.elements.length) {
+			astKey = candidateKey;
+			ast = candidateAst;
+			break;
+		}
+		expressionIndex -= candidateAst.elements.length;
+	}
+
+	return createFormula({
+		distFormulaIndex: formula.distFormulaIndex,
+		hueHeadstartValue: formula.hueHeadstartValue,
+		tHeadstartValue: formula.tHeadstartValue,
+		tScaleValue: formula.tScaleValue,
+		xAst: astKey === 'xAst' ? removeOuterExpressionAt(ast, expressionIndex) : formula.xAst,
+		yAst: astKey === 'yAst' ? removeOuterExpressionAt(ast, expressionIndex) : formula.yAst,
+	});
+}
+
 class BitWriter {
 	bytes = [];
 	currentByte = 0;
